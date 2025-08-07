@@ -274,7 +274,7 @@ def downloadPip(source, dest, work_dir):
 
     if not '--no-deps' in pip_opts: pip_opts = '--no-deps ' + pip_opts
     if not '--no-cache-dir' in pip_opts: pip_opts = '--no-cache-dir ' + pip_opts
-    comm = 'cd ' + dest + ";" + pip + ' download --python-version=39 --abi=cp39 ' + pip_opts + ' --disable-pip-version-check -q -d . %s; mv *.* %s; ls -l' % (pack, filename)
+    comm = 'cd ' + dest + ";" + pip + ' download ' + pip_opts + ' --disable-pip-version-check -q -d . %s; mv *.* %s; ls -l' % (pack, filename)
     error, output = getstatusoutput(comm)
     print(output)
     return  False
@@ -339,7 +339,7 @@ def download(source, dest, work_dir):
 
     realFile = join(downloadDir, filename)
     if not exists(realFile):
-        debug ("Trying to fetch source file: %s" % source)
+        debug ("Trying to fetch source file:", source)
         downloadHandler(source, downloadDir, work_dir)
 
     if exists(realFile):

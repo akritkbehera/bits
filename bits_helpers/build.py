@@ -668,6 +668,13 @@ def doBuild(args, parser):
     # %(short_hash)s and %(tag)s.
     spec["version"] = resolve_version(spec, args.defaults, branch_basename, branch_stream)
     variables = spec.get("variables", {})
+    if "Python" in spec.get("requires", []):
+      python_version = specs["Python"].get("version","").split(".")
+      variables["python_major_version"] = python_version[0].replace("v","")
+      variables["python_minor_version"] = python_version[1]
+      variables["python_patch_version"] = python_version[2] if len(python_version) > 2 else "0"
+      variables["python_major_minor"] = variables["python_major_version"]+"."+variables["python_minor_version"]
+      variables["python_major_minor_str"] = variables["python_major_version"]+variables["python_minor_version"]
     for k, v in variables.items():
       variables[k] = resolve_spec_data(spec, v, args.defaults, branch_basename, branch_stream)
     if "source" in spec:
