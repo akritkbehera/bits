@@ -16,7 +16,7 @@ from shlex import quote
 from bits_helpers.cmd import getoutput
 from bits_helpers.git import git
 
-from bits_helpers.log import error, warning, dieOnError
+from bits_helpers.log import error, warning, dieOnError, debug
 
 class SpecError(Exception):
   pass
@@ -354,6 +354,14 @@ def readDefaults(configDir, defaults, error, architecture):
     for x in ["env", "disable", "overrides"]:
       defaultsMeta.setdefault(x, {}).update(archMeta.get(x, {}))
     defaultsBody += "\n# Architecture defaults\n" + archBody
+
+  # Use processor string for env selection
+  processor = platform.processor() or platform.machine()
+  env = defaultsMeta.get("env", {})
+  for k, v in list(env.items()):
+    if isinstance(v, dict):
+      env[k] = v.get(processor, v.get("default", next(iter(v.values()))))
+  debug("[readDefaults] Resolved env for processor %r: %r", processor, env)
   return (defaultsMeta, defaultsBody)
 
 
@@ -741,3 +749,19 @@ class Hasher:
     new_hasher = Hasher()
     new_hasher.h = self.h.copy()
     return new_hasher
+
+def readEnvFlags(configDir):
+    import platform
+    flagsFile = os.path.join(configDir, "envflags.yaml")
+    if not exists(flagsFile):
+        return None
+    with open(flagsFile) as f:
+        import yaml
+        all_flags = yaml.safe_load(f) or {}
+      # Use processor string for architecture selection
+    processor = platform.processor() or platform.machine()
+    # Try exact match, else fallback to 'default' if present
+    flags = all_flags.get(processor)
+    if flags is None:
+        flags = all_flags.get('default', {})
+    return flags or {}

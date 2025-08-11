@@ -34,6 +34,7 @@ import time
 import subprocess
 
 from jinja2.sandbox import SandboxedEnvironment
+from bits_helpers.utilities import readEnvFlags
 
 def writeAll(fn, txt) -> None:
   f = open(fn, "w")
@@ -512,6 +513,8 @@ def doBuild(args, parser):
   debug("Number of parallel builds: %d", args.jobs)
   debug("Using bitsBuild from bits@%s recipes in dist@%s",
         __version__ or "unknown", os.environ["BITS_DIST_HASH"])
+  
+  
 
   install_wrapper_script("git", workDir)
 
@@ -822,8 +825,7 @@ def doBuild(args, parser):
     # we simply store the fact that we can reuse the contents of cachedTarball.
     syncHelper.fetch_symlinks(spec)
 
-    # Decide how it should be called, based on the hash and what is already
-    # available.
+    # Decide how it should be called, based on the hash and what is already.
     debug("Checking for packages already built.")
 
     # Make sure this regex broadly matches the regex below that parses the
@@ -1132,6 +1134,15 @@ def doBuild(args, parser):
     # Add the computed track_env environment
     buildEnvironment += [(key, value) for key, value in spec.get("track_env", {}).items()]
 
+    # Add the environment variables from the config file.
+    # This is used to pass the environment variables from the config file
+    # to the build script, e.g. to set up the environment for the build.
+    debug(spec["package"] + " - Reading environment flags from config file: %s", args.configDir)
+    envflags_config = readEnvFlags(args.configDir)
+    if envflags_config:
+        debug("[envflags] Adding envflags to build environment: %r", envflags_config)
+        for k, v in envflags_config.items():
+            buildEnvironment.append((k, v))
     # In case the --docker options is passed, we setup a docker container which
     # will perform the actual build. Otherwise build as usual using bash.
     if args.docker:
