@@ -274,7 +274,7 @@ def downloadPip(source, dest, work_dir):
 
     if not '--no-deps' in pip_opts: pip_opts = '--no-deps ' + pip_opts
     if not '--no-cache-dir' in pip_opts: pip_opts = '--no-cache-dir ' + pip_opts
-    comm = 'cd ' + dest + ";" + pip + ' download ' + pip_opts + ' --disable-pip-version-check -q -d . %s; mv *.* %s; ls -l' % (pack, filename)
+    comm = 'cd ' + dest + ";" + pip + ' download --python-version=%(python_major_minor_str)s --abi=cp%(python_major_minor_str)s ' + pip_opts + ' --disable-pip-version-check -q -d . %s; mv *.* %s; ls -l' % (pack, filename)
     error, output = getstatusoutput(comm)
     print(output)
     return  False
