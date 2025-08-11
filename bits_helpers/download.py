@@ -339,7 +339,7 @@ def download(source, dest, work_dir):
 
     realFile = join(downloadDir, filename)
     if not exists(realFile):
-        debug ("Trying to fetch source file:", source)
+        debug ("Trying to fetch source file: %s", source)
         downloadHandler(source, downloadDir, work_dir)
 
     if exists(realFile):
