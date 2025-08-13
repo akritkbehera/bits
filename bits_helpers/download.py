@@ -323,6 +323,7 @@ def download(source, dest, work_dir):
     match = urlTypeRe.match(source)
     if not urlTypeRe.match(source):
         raise MalformedUrl(source)
+    print("Debug:", source)
     downloadHandler = downloadHandlers[match.group(1)]
     filename = source.rsplit("/", 1)[1]
     downloadDir = join(cacheDir, checksum[0:2], checksum)
@@ -341,4 +342,3 @@ def download(source, dest, work_dir):
     else:
         raise downloadDir
     return
-
