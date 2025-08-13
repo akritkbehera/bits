@@ -14,6 +14,7 @@ from time import time
 from types import SimpleNamespace
 from bits_helpers.log import error, warning, debug
 import json
+import json
 
 urlRe = re.compile(r".*:.*/.*")
 urlAuthRe = re.compile(r'^(http(s|)://)([^:]+:[^@]+)@(.+)$')
@@ -214,13 +215,7 @@ def parseGitUrl(url):
     return protocol, gitroot, args
 
 
-downloadHandlers = {
-                    'http': downloadUrllib2,
-                    'https': downloadUrllib2,
-                    'ftp': downloadUrllib2,
-                    'ftps': downloadUrllib2,
-                    'git': downloadGit,
-                    'pip3': downloadPip3}
+
 
 
 def createTempDir(workDir, subDir):
@@ -273,6 +268,9 @@ def fixUrl(s):
             if s.endswith('?'): s=s[:-1]
     return s
 
+
+
+
 def downloadPip(source, dest, work_dir):
     # Valid PIP URL formats are
     # pip://package/version?[pip_options=downloadOptions&][pip=pip_command&][pip_package=package&]output=/tarbalname
@@ -306,12 +304,10 @@ def downloadPip(source, dest, work_dir):
                     pack = spSrc[i + 1]
                     i = i + 1
                 else:
-                    if ("no-binary" in spSrc[i]) or ("only-binary" in spSrc[i]):
+                    if "no-binary" in spSrc[i]:
                         spSrc[i] = re.sub(',arch=[a-z0-9_]+','',spSrc[i])
                     pip_opts = pip_opts + ' ' + spSrc[i]
-                    if "only-binary=:all:" in spSrc[i]:
-                        isSourceDownload=False
-                    elif "no-binary" in spSrc[i] and "all" not in spSrc[i]:
+                    if "no-binary" in spSrc[i] and "all" not in spSrc[i]:
                         isSourceDownload=False #not totally robust - but basically use pip if source is overridden
 
     if isSourceDownload:
@@ -329,9 +325,13 @@ def downloadPip(source, dest, work_dir):
 
     if not '--no-deps' in pip_opts: pip_opts = '--no-deps ' + pip_opts
     if not '--no-cache-dir' in pip_opts: pip_opts = '--no-cache-dir ' + pip_opts
-    comm = 'cd ' + dest + ";" + pip + ' download ' + pip_opts + ' --disable-pip-version-check -q -d . %s; [ -e %s ] || mv *.* %s; ls -l' % (pack, filename, filename)
+    comm = 'cd ' + dest + ";" + pip + ' download --python-version=%(python_major_minor_str)s --abi=cp%(python_major_minor_str)s ' + pip_opts + ' --disable-pip-version-check -q -d . %s; mv *.* %s; ls -l' % (pack, filename)
     error, output = getstatusoutput(comm)
-    return not error
+    print(output)
+    return  False
+    if error:
+        return False
+    return True
 
 
 downloadHandlers = {
@@ -378,6 +378,7 @@ def download(source, dest, work_dir):
     match = urlTypeRe.match(source)
     if not urlTypeRe.match(source):
         raise MalformedUrl(source)
+    print("Debug:", source)
     downloadHandler = downloadHandlers[match.group(1)]
     if match.group(1) == "pip3":
         return downloadHandler(source, dest, work_dir)
@@ -398,4 +399,3 @@ def download(source, dest, work_dir):
     else:
         raise downloadDir
     return
-
