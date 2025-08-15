@@ -8,6 +8,7 @@ import sys
 import os
 import re
 import platform
+import pprint
 
 from datetime import datetime
 from collections import OrderedDict
@@ -351,6 +352,7 @@ def readDefaults(configDir, defaults, error, architecture):
     if err:
       error(err)
       sys.exit(1)
+    pprint.pprint(archMeta)
     for x in ["env", "disable", "overrides"]:
       defaultsMeta.setdefault(x, {}).update(archMeta.get(x, {}))
     defaultsBody += "\n# Architecture defaults\n" + archBody
@@ -419,6 +421,19 @@ def yamlDump(s):
   YamlOrderedDumper.add_representer(OrderedDict, represent_ordereddict)
   return yaml.dump(s, Dumper=YamlOrderedDumper)
 
+def getInheritedRecipe(file_path):
+    err, recipe = (None, None)
+    try:
+        with open(file_path, 'r') as f:
+            d = f.read()
+        header, recipe = d.split("---", 1)
+    except IOError as e:
+        err = str(e)
+    except ValueError:
+        err = "Unable to parse %s. Header missing." % file_path
+    debug("&&&getInheritedRecipe: file_path is %s, err is %s, recipe is %s", file_path, err, recipe)
+    return err, recipe
+
 def parseRecipe(reader):
   assert(reader.__call__)
   err, spec, recipe = (None, None, None)
@@ -439,6 +454,13 @@ def parseRecipe(reader):
     err = "Unable to parse %s\n%s" % (reader.url, str(e))
   except ValueError:
     err = "Unable to parse %s. Header missing." % reader.url
+  debug("&&&spec, recipe is %s", (spec, recipe))
+  if "inherits_body" in spec:
+    search_path = os.path.join(os.getcwd(), os.environ.get("BITS_REPO_DIR","alidist"), spec["inherits_body"][0])
+    search_file = search_path + "/" + spec['package'] + '.sh'
+    inherited_err, inherited_recipe = getInheritedRecipe(search_file)
+    debug("The Inherited Recipe is from %s, in %s", spec["package"], spec["inherits_body"][0])
+    return inherited_err, spec, inherited_recipe
   return err, spec, recipe
 
 # (Almost pure part of the defaults parsing)
@@ -534,6 +556,7 @@ def getPackageList(packages, specs, configDir, preferSystem, noSystem,
 
   while packages:
     p = packages.pop(0)
+    debug("Processing package %s", p)
     if p in specs or (p == "defaults-release" and ("defaults-" + defaults) in specs):
       continue
 
