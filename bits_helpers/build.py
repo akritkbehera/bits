@@ -764,7 +764,7 @@ def doBuild(args, parser):
   # can check if the build was consistent and if it is, we bail out.
   report_event("install", "{p} disabled={dis} devel={dev} system={sys} own={own} deps={deps}".format(
     p=args.pkgname,
-    dis=",".join(sorted(args.disable)),
+    dis=",".join(sorted(str(item) if isinstance(item, str) else item.get('package', str(item)) for item in args.disable)),
     dev=",".join(sorted(spec["package"] for spec in specs.values() if spec["is_devel_pkg"])),
     sys=",".join(sorted(systemPackages)),
     own=",".join(sorted(ownPackages)),

@@ -17,7 +17,8 @@ from shlex import quote
 from bits_helpers.cmd import getoutput
 from bits_helpers.git import git
 
-from bits_helpers.log import error, warning, dieOnError
+from bits_helpers.log import error, warning, dieOnError, debug
+from bits_helpers.merge import version_rule, tag_rule, env_rule
 
 class SpecError(Exception):
   pass
@@ -422,46 +423,119 @@ def yamlDump(s):
   return yaml.dump(s, Dumper=YamlOrderedDumper)
 
 def getInheritedRecipe(file_path):
-    err, recipe = (None, None)
+    err, recipe, header_text = (None, None, None)
     try:
         with open(file_path, 'r') as f:
             d = f.read()
-        header, recipe = d.split("---", 1)
+        header_text, recipe = d.split("---", 1)
     except IOError as e:
         err = str(e)
     except ValueError:
         err = "Unable to parse %s. Header missing." % file_path
     debug("&&&getInheritedRecipe: file_path is %s, err is %s, recipe is %s", file_path, err, recipe)
-    return err, recipe
+    return err, recipe, header_text
 
-def parseRecipe(reader):
-  assert(reader.__call__)
-  err, spec, recipe = (None, None, None)
-  try:
-    d = reader()
-    header,recipe = d.split("---", 1)
-    spec = yamlLoad(header)
-    validateSpec(spec)
-  except RuntimeError as e:
-    err = str(e)
-  except IOError as e:
-    err = str(e)
-  except SpecError as e:
-    err = "Malformed header for %s\n%s" % (reader.url, str(e))
-  except yaml.scanner.ScannerError as e:
-    err = "Unable to parse %s\n%s" % (reader.url, str(e))
-  except yaml.parser.ParserError as e:
-    err = "Unable to parse %s\n%s" % (reader.url, str(e))
-  except ValueError:
-    err = "Unable to parse %s. Header missing." % reader.url
-  debug("&&&spec, recipe is %s", (spec, recipe))
-  if "inherits_body" in spec:
-    search_path = os.path.join(os.getcwd(), os.environ.get("BITS_REPO_DIR","alidist"), spec["inherits_body"][0])
+def getInheritedSpec(file_path):
+    err, recipe, spec = (None, None, None)
+    try:
+        with open(file_path, 'r') as f:
+            d = f.read()
+        header_text, recipe = d.split("---", 1)
+        spec = yamlLoad(header_text)
+        validateSpec(spec)  
+    except IOError as e:
+        err = str(e)
+    except ValueError:
+        err = "Unable to parse %s. Header missing." % file_path
+    debug("&&&getInheritedSpec: file_path is %s, err is %s, spec is %s", file_path, err, spec)
+    return spec
+
+def resolveRecipeInheritance(spec, recipe_path_base):
+    """Input: spec['package'], spec['inherits_body'][0] (if exists) and recipe"""
+    """Output: err, recipe"""
+    """Check if the spec has requirement for recursive inheritance if yes find the base spec file and then call get getInheritedRecipe"""
+    """If the spec does not have inherits_body, that's the exit statement for recursion and we just return the recipe there"""
+    """The trick is that we need the file path of the file where the exit statement is fullfilled, so we can read the file and return the recipe"""
+    """Need to catch the case where there is cycling inheritance, i.e. a package inherits from itself or from another package that inherits from it"""
+    
+    if "inherits_body" not in spec:
+        search_file = recipe_path_base + "/" + spec['package'] + '.sh'
+        err, recipe, _ = getInheritedRecipe(search_file)
+        return err, recipe
+    
+    search_path = os.path.join(os.environ.get("BITS_PATH"), spec["inherits_body"][0])
     search_file = search_path + "/" + spec['package'] + '.sh'
-    inherited_err, inherited_recipe = getInheritedRecipe(search_file)
-    debug("The Inherited Recipe is from %s, in %s", spec["package"], spec["inherits_body"][0])
-    return inherited_err, spec, inherited_recipe
-  return err, spec, recipe
+    
+    err, recipe, header_text = getInheritedRecipe(search_file)
+    if err:
+        return err, None
+    
+    try:
+        next_spec = yamlLoad(header_text)
+        validateSpec(next_spec)
+        
+        return resolveRecipeInheritance(next_spec, search_path)
+    except Exception as e:
+        return f"Error parsing inherited header for {spec['package']}: {str(e)}", None
+
+def resolveHeader(spec, base_spec):
+    """Input: Current Spec, Base Spec File Path"""
+    """Output: Resolved Spec"""
+    """This function resolves the header of the spec by reading the base spec file and merging it with the current spec"""
+    """If the spec has inherits_header, it will read the base spec file and merge it with the current spec"""
+    """Load the base spec file, validate it"""
+    header = (getInheritedSpec(base_spec))
+    if spec.get('package') == header.get('package'):
+      debug("&&&resolveHeader: spec package is %s, base_spec package is %s", spec.get('package'), header.get('package'))
+      version_rule(spec, header)
+      tag_rule(spec, header)
+      env_rule(spec, header)
+      debug("&&&resolveHeader: spec package env is %s", spec.get('env'))
+    else: 
+      exception_message = f"Package name mismatch: {spec.get('package')} != {header.get('package')}"
+      raise ValueError(exception_message)
+    
+def parseRecipe(reader):
+    assert(reader.__call__)
+    err, spec, recipe = (None, None, None)
+    try:
+        d = reader()
+        header, recipe = d.split("---", 1)
+        spec = yamlLoad(header)
+        validateSpec(spec)
+    except RuntimeError as e:
+        err = str(e)
+    except IOError as e:
+        err = str(e)
+    except SpecError as e:
+        err = "Malformed header for %s\n%s" % (reader.url, str(e))
+    except yaml.scanner.ScannerError as e:
+        err = "Unable to parse %s\n%s" % (reader.url, str(e))
+    except yaml.parser.ParserError as e:
+        err = "Unable to parse %s\n%s" % (reader.url, str(e))
+    except ValueError:
+        err = "Unable to parse %s. Header missing." % reader.url
+    debug("&&&spec, recipe is %s", (spec, recipe))
+
+    if "inherits_header" in spec:
+      debug("&&&resolveHeader: spec has inherits_header, spec is %s", spec)
+      base_spec = os.path.join(os.getcwd(), os.environ.get("BITS_REPO_DIR", "alidist"), spec["inherits_header"][0], spec["package"] + ".sh")
+      debug("&&&resolveHeader: base_spec is %s", base_spec)
+      debug("&&&resolveHeader: spec type is %s", type(spec))
+      resolveHeader(spec, base_spec)
+    
+    if "inherits_body" in spec:
+        # Get the recipe through inheritance
+        base_path = os.path.join(os.getcwd(), os.environ.get("BITS_REPO_DIR", "alidist"), spec["inherits_body"][0])
+        inherited_err, inherited_recipe = resolveRecipeInheritance(spec, base_path)
+        
+        if inherited_err:
+            return inherited_err, spec, recipe
+            
+        debug("The Inherited Recipe is from %s, in %s (recursive)", spec["package"], spec["inherits_body"][0])
+        return None, spec, inherited_recipe
+    
+    return err, spec, recipe
 
 # (Almost pure part of the defaults parsing)
 # Override defaultsGetter for unit tests.
@@ -500,7 +574,6 @@ def checkForFilename(taps, pkg, d):
 def getConfigPaths(configDir):
   configPath = os.environ.get("BITS_PATH")
   pkgDirs = [configDir]
-
   if configPath:
     for d in [join(configDir, "%s.bits" % r) for r in configPath.split(",") if r]:
        if exists(d):
@@ -556,7 +629,6 @@ def getPackageList(packages, specs, configDir, preferSystem, noSystem,
 
   while packages:
     p = packages.pop(0)
-    debug("Processing package %s", p)
     if p in specs or (p == "defaults-release" and ("defaults-" + defaults) in specs):
       continue
 
