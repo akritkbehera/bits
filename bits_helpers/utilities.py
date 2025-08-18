@@ -422,77 +422,39 @@ def yamlDump(s):
   return yaml.dump(s, Dumper=YamlOrderedDumper)
 
 def getInheritedRecipe(file_path):
-    err, recipe, header_text = (None, None, None)
+    err, recipe, header = (None, None, None)
     try:
         with open(file_path, 'r') as f:
             d = f.read()
-        header_text, recipe = d.split("---", 1)
+            header, recipe = d.split("---", 1)
     except IOError as e:
         err = str(e)
     except ValueError:
         err = "Unable to parse %s. Header missing." % file_path
     debug("&&&getInheritedRecipe: file_path is %s, err is %s, recipe is %s", file_path, err, recipe)
-    return err, recipe, header_text
+    return err, recipe, header
 
-def getInheritedSpec(file_path):
-    err, recipe, spec = (None, None, None)
-    try:
-        with open(file_path, 'r') as f:
-            d = f.read()
-        header_text, recipe = d.split("---", 1)
-        spec = yamlLoad(header_text)
-        validateSpec(spec)  
-    except IOError as e:
-        err = str(e)
-    except ValueError:
-        err = "Unable to parse %s. Header missing." % file_path
-    debug("&&&getInheritedSpec: file_path is %s, err is %s, spec is %s", file_path, err, spec)
-    return spec
-
-def resolveRecipeInheritance(spec, recipe_path_base):
-    """Input: spec['package'], spec['inherits_body'][0] (if exists) and recipe"""
-    """Output: err, recipe"""
-    """Check if the spec has requirement for recursive inheritance if yes find the base spec file and then call get getInheritedRecipe"""
-    """If the spec does not have inherits_body, that's the exit statement for recursion and we just return the recipe there"""
-    """The trick is that we need the file path of the file where the exit statement is fullfilled, so we can read the file and return the recipe"""
-    """Need to catch the case where there is cycling inheritance, i.e. a package inherits from itself or from another package that inherits from it"""
-    
-    if "inherits_body" not in spec:
-        search_file = recipe_path_base + "/" + spec['package'] + '.sh'
-        err, recipe, _ = getInheritedRecipe(search_file)
-        return err, recipe
-    
-    search_path = os.path.join(os.environ.get("BITS_PATH"), spec["inherits_body"][0])
-    search_file = search_path + "/" + spec['package'] + '.sh'
-    
-    err, recipe, header_text = getInheritedRecipe(search_file)
+def resolveRecipeInheritance(file, visited=None):
+    if visited is None:
+        visited = set()
+    if file in visited:
+        return f"Circular dependency detected involving {file}", None
+    visited.add(file)
+    err, recipe, header = getInheritedRecipe(file)
     if err:
         return err, None
-    
     try:
-        next_spec = yamlLoad(header_text)
-        validateSpec(next_spec)
-        
-        return resolveRecipeInheritance(next_spec, search_path)
-    except Exception as e:
-        return f"Error parsing inherited header for {spec['package']}: {str(e)}", None
-
-def resolveHeader(spec, base_spec):
-    """Input: Current Spec, Base Spec File Path"""
-    """Output: Resolved Spec"""
-    """This function resolves the header of the spec by reading the base spec file and merging it with the current spec"""
-    """If the spec has inherits_header, it will read the base spec file and merge it with the current spec"""
-    """Load the base spec file, validate it"""
-    header = (getInheritedSpec(base_spec))
-    if spec.get('package') == header.get('package'):
-      debug("&&&resolveHeader: spec package is %s, base_spec package is %s", spec.get('package'), header.get('package'))
-      version_rule(spec, header)
-      tag_rule(spec, header)
-      env_rule(spec, header)
-      debug("&&&resolveHeader: spec package env is %s", spec.get('env'))
-    else: 
-      exception_message = f"Package name mismatch: {spec.get('package')} != {header.get('package')}"
-      raise ValueError(exception_message)
+        spec = yaml.safe_load(header.strip())
+    except:
+        spec = None
+    if spec and "inherits_body" in spec:
+        if recipe and recipe.strip():
+          warning("Recipe in %s is not empty and will be ignored due to inheritance from %s in %s",spec["package"], spec["package"], spec["inherits_body"][0])
+        inherit_path = os.path.join(os.environ.get("BITS_REPO_DIR"), spec["inherits_body"][0])
+        inherit_file = inherit_path + "/" + spec['package'] + '.sh'
+        debug("The Inherited Recipe is from %s, in %s", spec["package"], spec["inherits_body"][0])
+        return resolveRecipeInheritance(inherit_file, visited)
+    return None, recipe
     
 def parseRecipe(reader):
     assert(reader.__call__)
@@ -516,18 +478,11 @@ def parseRecipe(reader):
         err = "Unable to parse %s. Header missing." % reader.url
     debug("&&&ENVIRONMENT VARIABLES ARE")
     debug("env keys: %s", list((spec or {}).get("env", {}).keys()))
-    
-    if "inherits_body" in spec:
-        # Get the recipe through inheritance
-        base_path = os.path.join(os.getcwd(), os.environ.get("BITS_REPO_DIR", "alidist"), spec["inherits_body"][0])
-        inherited_err, inherited_recipe = resolveRecipeInheritance(spec, base_path)
-        
-        if inherited_err:
-            return inherited_err, spec, recipe
-            
-        debug("The Inherited Recipe is from %s, in %s (recursive)", spec["package"], spec["inherits_body"][0])
-        return None, spec, inherited_recipe
-    
+    if spec and "inherits_body" in spec:
+      inherited_err, inherited_recipe=resolveRecipeInheritance(os.path.join(os.environ.get("BITS_REPO_DIR"), spec["inherits_body"][0])+ "/" + spec['package'] + '.sh')
+      if inherited_err:
+        dieOnError("Error while resolving inheritance: %s", inherited_err)
+      return inherited_err, spec, inherited_recipe
     return err, spec, recipe
 
 # (Almost pure part of the defaults parsing)
