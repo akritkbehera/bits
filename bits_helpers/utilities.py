@@ -515,14 +515,12 @@ def parseRecipe(reader):
         err = "Unable to parse %s\n%s" % (reader.url, str(e))
     except ValueError:
         err = "Unable to parse %s. Header missing." % reader.url
-    debug("&&&spec, recipe is %s", (spec, recipe))
-
-    if "inherits_header" in spec:
-      debug("&&&resolveHeader: spec has inherits_header, spec is %s", spec)
-      base_spec = os.path.join(os.getcwd(), os.environ.get("BITS_REPO_DIR", "alidist"), spec["inherits_header"][0], spec["package"] + ".sh")
-      debug("&&&resolveHeader: base_spec is %s", base_spec)
-      debug("&&&resolveHeader: spec type is %s", type(spec))
-      resolveHeader(spec, base_spec)
+    debug("&&&ENVIRONMENT VARIABLES ARE")
+    debug("env keys: %s", list((spec or {}).get("env", {}).keys()))
+    if 'cmake' in spec:
+      debug("&&&cmake configs found in defaults spec %s", spec["cmake"])
+      cmake_cfg = (spec or OrderedDict()).get("cmake", OrderedDict())
+      debug("&&&cmake configs found in defaults are for package %s", cmake_cfg)
     
     if "inherits_body" in spec:
         # Get the recipe through inheritance
@@ -560,6 +558,18 @@ def parseDefaults(disable, defaultsGetter, log):
     if "@" in k:
       taps[f] = "dist:"+k
     overrides[f] = dict(**(v or {}))
+  # If defaults specify per-package CMake configs, append them as-is
+  # Need to do exclusive merge with env to not override.
+  cmake_map = defaultsMeta.get("cmake") or {}
+  if not isinstance(cmake_map, dict):
+    debug("defaults 'cmake' is not a dict; ignoring: %s", type(cmake_map))
+  else:
+    for k, v in cmake_map.items():
+      f = k.split("@", 1)[0].lower()
+      # ensure package override map exists
+      overrides.setdefault(f, OrderedDict())
+      # attach cmake config verbatim under the package
+      overrides[f]["cmake"] = v
   return (None, overrides, taps)
 
 def checkForFilename(taps, pkg, d):

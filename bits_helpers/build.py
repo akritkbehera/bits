@@ -467,7 +467,7 @@ def doBuild(args, parser):
   syncHelper = remote_from_url(args.remoteStore, args.writeStore, args.architecture,
                                args.workDir, getattr(args, "insecure", False))
 
-  packages = args.pkgname
+  packages = args.pkgname 
   specs = {}
   buildOrder = []
   workDir = abspath(args.workDir)
@@ -1112,6 +1112,12 @@ def doBuild(args, parser):
       ("FULL_BUILD_REQUIRES", " ".join(spec["full_build_requires"])),
       ("FULL_REQUIRES", " ".join(spec["full_requires"])),
     ]
+    
+    # Add any cmake variables from the spec["cmake"] dictionary
+    if "cmake" in spec:
+      debug("&&& The spec is as follows:")
+      for k, v in spec["cmake"].items():
+        buildEnvironment.append((k, str(v)))
     if "sources" in spec:
       for idx, src in enumerate(spec["sources"]):
         buildEnvironment.append(("SOURCE%s" % idx, basename(src)))
