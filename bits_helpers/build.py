@@ -490,7 +490,7 @@ def doBuild(args, parser):
     branch_stream = ""
 
   defaultsReader = lambda : readDefaults(args.configDir, args.defaults, parser.error, args.architecture)
-  (err, overrides, taps) = parseDefaults(args.disable,
+  (err, overrides, taps, package_env) = parseDefaults(args.disable,
                                         defaultsReader, debug)
   dieOnError(err, err)
 
@@ -1112,12 +1112,10 @@ def doBuild(args, parser):
       ("FULL_BUILD_REQUIRES", " ".join(spec["full_build_requires"])),
       ("FULL_REQUIRES", " ".join(spec["full_requires"])),
     ]
-    
-    # Add any cmake variables from the spec["cmake"] dictionary
-    if "cmake" in spec:
-      debug("&&& The spec is as follows:")
-      for k, v in spec["cmake"].items():
-        buildEnvironment.append((k, str(v)))
+
+    if spec["package"] in package_env:
+      for key, value in package_env[spec["package"]].items():
+        buildEnvironment.append((key, str(value)))
     if "sources" in spec:
       for idx, src in enumerate(spec["sources"]):
         buildEnvironment.append(("SOURCE%s" % idx, basename(src)))

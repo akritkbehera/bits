@@ -353,7 +353,6 @@ def readDefaults(configDir, defaults, error, architecture):
     if err:
       error(err)
       sys.exit(1)
-    pprint.pprint(archMeta)
     for x in ["env", "disable", "overrides"]:
       defaultsMeta.setdefault(x, {}).update(archMeta.get(x, {}))
     defaultsBody += "\n# Architecture defaults\n" + archBody
@@ -517,10 +516,6 @@ def parseRecipe(reader):
         err = "Unable to parse %s. Header missing." % reader.url
     debug("&&&ENVIRONMENT VARIABLES ARE")
     debug("env keys: %s", list((spec or {}).get("env", {}).keys()))
-    if 'cmake' in spec:
-      debug("&&&cmake configs found in defaults spec %s", spec["cmake"])
-      cmake_cfg = (spec or OrderedDict()).get("cmake", OrderedDict())
-      debug("&&&cmake configs found in defaults are for package %s", cmake_cfg)
     
     if "inherits_body" in spec:
         # Get the recipe through inheritance
@@ -549,8 +544,9 @@ def parseDefaults(disable, defaultsGetter, log):
     log("Package %s has been disabled by current default.", x)
   disable.extend(defaultsDisable)
   if type(defaultsMeta.get("overrides", OrderedDict())) != OrderedDict:
-    return ("overrides should be a dictionary", None, None)
+    return ("overrides should be a dictionary", None, None, None)
   overrides, taps = OrderedDict(), {}
+  package_env = OrderedDict()
   commonEnv = {"env": defaultsMeta["env"]} if "env" in defaultsMeta else {}
   overrides["defaults-release"] = commonEnv
   for k, v in defaultsMeta.get("overrides", {}).items():
@@ -558,19 +554,23 @@ def parseDefaults(disable, defaultsGetter, log):
     if "@" in k:
       taps[f] = "dist:"+k
     overrides[f] = dict(**(v or {}))
-  # If defaults specify per-package CMake configs, append them as-is
-  # Need to do exclusive merge with env to not override.
-  cmake_map = defaultsMeta.get("cmake") or {}
-  if not isinstance(cmake_map, dict):
-    debug("defaults 'cmake' is not a dict; ignoring: %s", type(cmake_map))
+  package_env_map = defaultsMeta.get("package_env") or {}
+  if not isinstance(package_env_map, dict):
+    return("'package_env' should be a dictionary %s", type(package_env_map))
   else:
-    for k, v in cmake_map.items():
+    global_env_keys = set(defaultsMeta.get("env", {}).keys())
+    for k, v in package_env_map.items():
       f = k.split("@", 1)[0].lower()
-      # ensure package override map exists
+      if f in package_env:
+        return (f"Duplicate Env '{f}' found in package_env", None, None, None)
+      if isinstance(v, dict):
+        conflicting_keys = global_env_keys.intersection(v.keys())
+      if conflicting_keys:
+        return (f"Environment variables {list(conflicting_keys)} redeclared in package_env for '{f}'", None, None, None)
+      package_env[f] = OrderedDict(v) if isinstance(v, dict) else v
       overrides.setdefault(f, OrderedDict())
-      # attach cmake config verbatim under the package
-      overrides[f]["cmake"] = v
-  return (None, overrides, taps)
+      overrides[f]["package_env"] = v
+  return (None, overrides, taps, package_env)
 
 def checkForFilename(taps, pkg, d):
   filename = taps.get(pkg, "%s/%s.sh" % (d, pkg))
