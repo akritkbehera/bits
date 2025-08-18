@@ -353,7 +353,6 @@ def readDefaults(configDir, defaults, error, architecture):
     if err:
       error(err)
       sys.exit(1)
-    pprint.pprint(archMeta)
     for x in ["env", "disable", "overrides"]:
       defaultsMeta.setdefault(x, {}).update(archMeta.get(x, {}))
     defaultsBody += "\n# Architecture defaults\n" + archBody
@@ -515,14 +514,8 @@ def parseRecipe(reader):
         err = "Unable to parse %s\n%s" % (reader.url, str(e))
     except ValueError:
         err = "Unable to parse %s. Header missing." % reader.url
-    debug("&&&spec, recipe is %s", (spec, recipe))
-
-    if "inherits_header" in spec:
-      debug("&&&resolveHeader: spec has inherits_header, spec is %s", spec)
-      base_spec = os.path.join(os.getcwd(), os.environ.get("BITS_REPO_DIR", "alidist"), spec["inherits_header"][0], spec["package"] + ".sh")
-      debug("&&&resolveHeader: base_spec is %s", base_spec)
-      debug("&&&resolveHeader: spec type is %s", type(spec))
-      resolveHeader(spec, base_spec)
+    debug("&&&ENVIRONMENT VARIABLES ARE")
+    debug("env keys: %s", list((spec or {}).get("env", {}).keys()))
     
     if "inherits_body" in spec:
         # Get the recipe through inheritance
@@ -551,8 +544,9 @@ def parseDefaults(disable, defaultsGetter, log):
     log("Package %s has been disabled by current default.", x)
   disable.extend(defaultsDisable)
   if type(defaultsMeta.get("overrides", OrderedDict())) != OrderedDict:
-    return ("overrides should be a dictionary", None, None)
+    return ("overrides should be a dictionary", None, None, None)
   overrides, taps = OrderedDict(), {}
+  package_env = OrderedDict()
   commonEnv = {"env": defaultsMeta["env"]} if "env" in defaultsMeta else {}
   overrides["defaults-release"] = commonEnv
   for k, v in defaultsMeta.get("overrides", {}).items():
@@ -560,7 +554,23 @@ def parseDefaults(disable, defaultsGetter, log):
     if "@" in k:
       taps[f] = "dist:"+k
     overrides[f] = dict(**(v or {}))
-  return (None, overrides, taps)
+  package_env_map = defaultsMeta.get("package_env") or {}
+  if not isinstance(package_env_map, dict):
+    return("'package_env' should be a dictionary %s", type(package_env_map))
+  else:
+    global_env_keys = set(defaultsMeta.get("env", {}).keys())
+    for k, v in package_env_map.items():
+      f = k.split("@", 1)[0].lower()
+      if f in package_env:
+        return (f"Duplicate Env '{f}' found in package_env", None, None, None)
+      if isinstance(v, dict):
+        conflicting_keys = global_env_keys.intersection(v.keys())
+      if conflicting_keys:
+        return (f"Environment variables {list(conflicting_keys)} redeclared in package_env for '{f}'", None, None, None)
+      package_env[f] = OrderedDict(v) if isinstance(v, dict) else v
+      overrides.setdefault(f, OrderedDict())
+      overrides[f]["package_env"] = v
+  return (None, overrides, taps, package_env)
 
 def checkForFilename(taps, pkg, d):
   filename = taps.get(pkg, "%s/%s.sh" % (d, pkg))

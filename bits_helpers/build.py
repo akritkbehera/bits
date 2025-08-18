@@ -467,7 +467,7 @@ def doBuild(args, parser):
   syncHelper = remote_from_url(args.remoteStore, args.writeStore, args.architecture,
                                args.workDir, getattr(args, "insecure", False))
 
-  packages = args.pkgname
+  packages = args.pkgname 
   specs = {}
   buildOrder = []
   workDir = abspath(args.workDir)
@@ -490,7 +490,7 @@ def doBuild(args, parser):
     branch_stream = ""
 
   defaultsReader = lambda : readDefaults(args.configDir, args.defaults, parser.error, args.architecture)
-  (err, overrides, taps) = parseDefaults(args.disable,
+  (err, overrides, taps, package_env) = parseDefaults(args.disable,
                                         defaultsReader, debug)
   dieOnError(err, err)
 
@@ -1112,6 +1112,10 @@ def doBuild(args, parser):
       ("FULL_BUILD_REQUIRES", " ".join(spec["full_build_requires"])),
       ("FULL_REQUIRES", " ".join(spec["full_requires"])),
     ]
+
+    if spec["package"] in package_env:
+      for key, value in package_env[spec["package"]].items():
+        buildEnvironment.append((key, str(value)))
     if "sources" in spec:
       for idx, src in enumerate(spec["sources"]):
         buildEnvironment.append(("SOURCE%s" % idx, basename(src)))
