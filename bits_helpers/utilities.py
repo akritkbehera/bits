@@ -435,44 +435,42 @@ def getInheritedRecipe(file_path):
     debug("&&&getInheritedRecipe: file_path is %s, err is %s, recipe is %s", file_path, err, recipe)
     return err, recipe, spec
 
-def mergeHeader( override_spec, base, mergePolicy):
-    if override_spec["package"] != base["package"]:
-        raise ValueError(
-            f"Cannot merge headers of different packages: {override_spec['package']} != {base['package']}"
-        )
-
-    inherit_keys = mergePolicy.get("inherit", [])
-    if inherit_keys is None:
-        inherit_keys = []
-    elif isinstance(inherit_keys, str):
-        inherit_keys = [inherit_keys]
-
-    append_keys = mergePolicy.get("append", [])
-    if append_keys is None:
-        append_keys = []
-    elif isinstance(append_keys, str):
-        append_keys = [append_keys]
-    debug("&&&mergeHeader: inherit_keys is %s, append_keys is %s", inherit_keys, append_keys)
-
-    for key, val in override_spec.items():
-        debug("&&&key/value: key is %s, val is %s", key, val)
-        if key in append_keys and key in base:
-            if isinstance(base[key], dict) and isinstance(val, dict):
-                base[key].update(val)
-            elif isinstance(base[key], list) and isinstance(val, list):
-                base[key].extend(val)
-            else:
-                base[key] = val
+def mergeHeaders(override_spec, base, merge_policy):
+    """Merge two package specifications according to the merge policy."""
+    if override_spec.get("package") != base.get("package"):
+        raise ValueError(f"Package mismatch: {override_spec.get('package')} != {base.get('package')}")
+    
+    # Parse policies
+    inherit_keys = _to_list(merge_policy.get("inherit", []))
+    append_keys = _to_list(merge_policy.get("append", []))
+    
+    result = base.copy()
+    
+    for key, value in override_spec.items():
+        if key in inherit_keys and key in base:
+            print(f"Warning: Keeping base value for '{key}' due to inherit policy")
+            continue
+        elif key in append_keys and key in base:
+            result[key] = _merge_values(base[key], value)
         else:
-            base[key] = val
+            result[key] = value
+    pprint.pprint(result)
+    return result
 
-    for key in inherit_keys:
-        if key in base and key in override_spec:
-            warning("Key '%s' is present in both base and override spec. Using value from override spec. Remove field to keep base value.", key)
-            pass
-        
-    pprint.pprint(base)
-    return base
+def _to_list(value):
+    """Convert string/None to list."""
+    if not value:
+        return []
+    return [x.strip() for x in value.split(',')] if isinstance(value, str) else value
+
+def _merge_values(base_val, override_val):
+    """Merge two values based on type."""
+    if isinstance(base_val, dict) and isinstance(override_val, dict):
+        return {**base_val, **override_val}
+    elif isinstance(base_val, list) and isinstance(override_val, list):
+        return base_val + override_val
+    return override_val
+
 
 def resolveRecipeInheritance(file, visited=None):
     if visited is None:
@@ -520,11 +518,12 @@ def parseRecipe(reader):
     if spec and "merge_policy" in spec:
       merge_policy = spec.pop("merge_policy", None) if spec else None
       debug("&&&merge_policy is %s", merge_policy)
+
     if spec and "from" in spec: 
-      debug("&&&from is %s", spec["from"])
       inherited_err, inherited_recipe, inherited_spec = getInheritedRecipe(os.path.join(os.environ.get("BITS_REPO_DIR"), spec["from"][0])+ "/" + spec['package'] + '.sh')
-      mergeHeader(spec, inherited_spec, merge_policy)
-      debug("&&&inherited_err is %s, inherited_spec is %s", inherited_err, inherited_spec)
+      merged_spec = mergeHeaders(spec, inherited_spec, merge_policy)
+      spec = merged_spec
+
     if spec and "inherits_body" in spec:
       inherited_err, inherited_recipe=resolveRecipeInheritance(os.path.join(os.environ.get("BITS_REPO_DIR"), spec["inherits_body"][0])+ "/" + spec['package'] + '.sh')
       if inherited_err:
