@@ -427,12 +427,52 @@ def getInheritedRecipe(file_path):
         with open(file_path, 'r') as f:
             d = f.read()
             header, recipe = d.split("---", 1)
+            spec = yamlLoad(header)
     except IOError as e:
         err = str(e)
     except ValueError:
         err = "Unable to parse %s. Header missing." % file_path
     debug("&&&getInheritedRecipe: file_path is %s, err is %s, recipe is %s", file_path, err, recipe)
-    return err, recipe, header
+    return err, recipe, spec
+
+def mergeHeader( override_spec, base, mergePolicy):
+    if override_spec["package"] != base["package"]:
+        raise ValueError(
+            f"Cannot merge headers of different packages: {override_spec['package']} != {base['package']}"
+        )
+
+    inherit_keys = mergePolicy.get("inherit", [])
+    if inherit_keys is None:
+        inherit_keys = []
+    elif isinstance(inherit_keys, str):
+        inherit_keys = [inherit_keys]
+
+    append_keys = mergePolicy.get("append", [])
+    if append_keys is None:
+        append_keys = []
+    elif isinstance(append_keys, str):
+        append_keys = [append_keys]
+    debug("&&&mergeHeader: inherit_keys is %s, append_keys is %s", inherit_keys, append_keys)
+
+    for key, val in override_spec.items():
+        debug("&&&key/value: key is %s, val is %s", key, val)
+        if key in append_keys and key in base:
+            if isinstance(base[key], dict) and isinstance(val, dict):
+                base[key].update(val)
+            elif isinstance(base[key], list) and isinstance(val, list):
+                base[key].extend(val)
+            else:
+                base[key] = val
+        else:
+            base[key] = val
+
+    for key in inherit_keys:
+        if key in base and key in override_spec:
+            warning("Key '%s' is present in both base and override spec. Using value from override spec. Remove field to keep base value.", key)
+            pass
+        
+    pprint.pprint(base)
+    return base
 
 def resolveRecipeInheritance(file, visited=None):
     if visited is None:
@@ -476,8 +516,15 @@ def parseRecipe(reader):
         err = "Unable to parse %s\n%s" % (reader.url, str(e))
     except ValueError:
         err = "Unable to parse %s. Header missing." % reader.url
-    debug("&&&ENVIRONMENT VARIABLES ARE")
-    debug("env keys: %s", list((spec or {}).get("env", {}).keys()))
+
+    if spec and "merge_policy" in spec:
+      merge_policy = spec.pop("merge_policy", None) if spec else None
+      debug("&&&merge_policy is %s", merge_policy)
+    if spec and "from" in spec: 
+      debug("&&&from is %s", spec["from"])
+      inherited_err, inherited_recipe, inherited_spec = getInheritedRecipe(os.path.join(os.environ.get("BITS_REPO_DIR"), spec["from"][0])+ "/" + spec['package'] + '.sh')
+      mergeHeader(spec, inherited_spec, merge_policy)
+      debug("&&&inherited_err is %s, inherited_spec is %s", inherited_err, inherited_spec)
     if spec and "inherits_body" in spec:
       inherited_err, inherited_recipe=resolveRecipeInheritance(os.path.join(os.environ.get("BITS_REPO_DIR"), spec["inherits_body"][0])+ "/" + spec['package'] + '.sh')
       if inherited_err:
