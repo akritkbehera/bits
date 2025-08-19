@@ -18,7 +18,7 @@ from bits_helpers.cmd import getoutput
 from bits_helpers.git import git
 
 from bits_helpers.log import error, warning, dieOnError, debug
-from bits_helpers.merge import version_rule, tag_rule, env_rule
+
 
 class SpecError(Exception):
   pass
@@ -421,115 +421,233 @@ def yamlDump(s):
   YamlOrderedDumper.add_representer(OrderedDict, represent_ordereddict)
   return yaml.dump(s, Dumper=YamlOrderedDumper)
 
+def get_from(spec):
+    f = spec.get("from")
+    if isinstance(f, list) and f and isinstance(f[0], str):
+        return f[0]
+    raise ValueError(f"Invalid 'from' format: {f}")
+
+def mergeHeader(override_spec, base, mergePolicy=None, visited=None):
+    debug("type(override_spec) is %s, type(base) is %s", type(override_spec), type(base))
+    if visited is None:
+        visited = set()
+  
+    if not isinstance(override_spec, dict):
+        raise ValueError("override_spec must be a dictionary")
+    if base is None:
+        raise ValueError("Base spec is required for merging headers")
+    if not isinstance(base, dict):
+        raise ValueError("Base must be a dictionary")
+    
+    # Extract merge policy from override_spec if present, otherwise use provided policy
+    mergePolicy = override_spec.pop("merge_policy", mergePolicy or {})
+    
+    # Validate that both specs have required fields
+    if "from" not in override_spec or not override_spec["from"]:
+        raise ValueError("override_spec must have a 'from' field")
+    if "package" not in override_spec:
+        raise ValueError("override_spec must have a 'package' field")
+    if "package" not in base:
+        raise ValueError("base must have a 'package' field")
+    
+    # Check for package compatibility
+    if override_spec["package"] != base["package"]:
+        raise ValueError(
+            f"Cannot merge headers of different packages: {override_spec['package']} != {base['package']}"
+        )
+    
+    # Circular dependency detection
+    override_repo = override_spec["from"][0] if isinstance(override_spec["from"], list) else override_spec["from"]
+    if override_repo in visited:
+        raise RuntimeError(f"Circular merge detected involving repo: {override_repo}")
+    
+    debug("&&&mergeHeader: override_spec is %s, base is %s", 
+          override_spec.get('from', ['unknown'])[0], 
+          base.get('from', ['unknown'])[0])
+
+    visited.add(override_repo)
+    
+    try:
+        if "from" not in base or not base["from"]:
+            final_base = base.copy()
+        else:
+            base_repo = base["from"][0] if isinstance(base["from"], list) else base["from"]
+            
+            if base_repo in visited:
+                raise RuntimeError(f"Circular merge detected involving repo: {base_repo}")
+            
+            try:
+                repo_dir = os.environ.get('BITS_REPO_DIR', '')
+                recipe_path = os.path.join(repo_dir, base_repo, base['package'] + '.sh')
+                err, body, base_from_spec = getInheritedRecipe(recipe_path)
+                
+                if err or not base_from_spec:
+                    raise ValueError(f"Failed to load inherited recipe from {recipe_path}")
+                
+                final_base = mergeHeader(base, base_from_spec, base.get("merge_policy", {}), visited.copy())
+                
+            except Exception as e:
+                raise ValueError(f"Error loading base specification: {e}")
+        
+        inherit_keys = mergePolicy.get("inherit", [])
+        if inherit_keys is None:
+            inherit_keys = []
+        elif isinstance(inherit_keys, str):
+            inherit_keys = [inherit_keys]
+        
+        append_keys = mergePolicy.get("append", [])
+        if append_keys is None:
+            append_keys = []
+        elif isinstance(append_keys, str):
+            append_keys = [append_keys]
+        
+        debug("&&&mergeHeader: inherit_keys is %s, append_keys is %s", inherit_keys, append_keys)
+        
+        # Apply merge rules
+        for key, val in override_spec.items():
+            debug("&&&key/value: key is %s, val is %s", key, val)
+            
+            if key in append_keys and key in final_base:
+                # Append logic based on data type
+                if isinstance(final_base[key], dict) and isinstance(val, dict):
+                    # For dictionaries, update (merge) them
+                    final_base[key] = final_base[key].copy()  # Avoid modifying original
+                    final_base[key].update(val)
+                elif isinstance(final_base[key], list) and isinstance(val, list):
+                    # For lists, extend them
+                    final_base[key] = final_base[key].copy()  # Avoid modifying original
+                    final_base[key].extend(val)
+                elif isinstance(final_base[key], str) and isinstance(val, str):
+                    # For strings, concatenate them
+                    final_base[key] = final_base[key] + val
+                else:
+                    # For different types, override
+                    final_base[key] = val
+            elif key in inherit_keys:
+                # Inherit logic: only set if not already present in override
+                if key not in final_base:
+                    final_base[key] = val
+                else:
+                    # Warn if key exists in both and we're inheriting
+                    warning("Key '%s' is present in both base and override spec. Using value from override spec. Remove field to keep base value.", key)
+            else:
+                # Default behavior: override
+                final_base[key] = val
+        
+        # Handle inherited keys that should be preserved from base
+        for key in inherit_keys:
+            if key in final_base and key not in override_spec:
+                # Key exists in base but not in override, keep base value
+                pass  # Already in final_base, no action needed
+        
+        return final_base
+        
+    finally:
+        # Clean up visited set (remove current repo when backtracking)
+        visited.discard(override_repo)
+
+
 def getInheritedRecipe(file_path):
-    err, recipe, header = (None, None, None)
     try:
         with open(file_path, 'r') as f:
-            d = f.read()
-            header, recipe = d.split("---", 1)
-            spec = yamlLoad(header)
+            content = f.read()
     except IOError as e:
-        err = str(e)
+        debug("getInheritedRecipe: failed to read %s: %s", file_path, e)
+        return (str(e), None, None)
+
+    try:
+        header_text, recipe_body = content.split('---', 1)
     except ValueError:
-        err = "Unable to parse %s. Header missing." % file_path
-    debug("&&&getInheritedRecipe: file_path is %s, err is %s, recipe is %s", file_path, err, recipe)
-    return err, recipe, spec
+        return ("Unable to parse %s. Header missing." % file_path, None, None)
 
-def mergeHeaders(override_spec, base, merge_policy):
-    """Merge two package specifications according to the merge policy."""
-    if override_spec.get("package") != base.get("package"):
-        raise ValueError(f"Package mismatch: {override_spec.get('package')} != {base.get('package')}")
-    
-    # Parse policies
-    inherit_keys = _to_list(merge_policy.get("inherit", []))
-    append_keys = _to_list(merge_policy.get("append", []))
-    
-    result = base.copy()
-    
-    for key, value in override_spec.items():
-        if key in inherit_keys and key in base:
-            print(f"Warning: Keeping base value for '{key}' due to inherit policy")
-            continue
-        elif key in append_keys and key in base:
-            result[key] = _merge_values(base[key], value)
-        else:
-            result[key] = value
-    pprint.pprint(result)
-    return result
+    try:
+        header_spec = yamlLoad(header_text)
+    except Exception as e:
+        debug("getInheritedRecipe: YAML parsing error for %s: %s", file_path, e)
+        return (str(e), None, None)
 
-def _to_list(value):
-    """Convert string/None to list."""
-    if not value:
-        return []
-    return [x.strip() for x in value.split(',')] if isinstance(value, str) else value
-
-def _merge_values(base_val, override_val):
-    """Merge two values based on type."""
-    if isinstance(base_val, dict) and isinstance(override_val, dict):
-        return {**base_val, **override_val}
-    elif isinstance(base_val, list) and isinstance(override_val, list):
-        return base_val + override_val
-    return override_val
+    debug("&&&getInheritedRecipe: file_path=%s, header_spec=%s", file_path, header_spec)
+    return (None, recipe_body, header_spec)
 
 
 def resolveRecipeInheritance(file, visited=None):
     if visited is None:
         visited = set()
     if file in visited:
-        return f"Circular dependency detected involving {file}", None
+        return (f"Circular dependency detected involving {file}", None)
     visited.add(file)
-    err, recipe, header = getInheritedRecipe(file)
+
+    err, recipe_body, header_spec = getInheritedRecipe(file)
     if err:
-        return err, None
-    try:
-        spec = yaml.safe_load(header.strip())
-    except:
-        spec = None
-    if spec and "inherits_body" in spec:
-        if recipe and recipe.strip():
-          warning("Recipe in %s is not empty and will be ignored due to inheritance from %s in %s",spec["package"], spec["package"], spec["inherits_body"][0])
-        inherit_path = os.path.join(os.environ.get("BITS_REPO_DIR"), spec["inherits_body"][0])
-        inherit_file = inherit_path + "/" + spec['package'] + '.sh'
-        debug("The Inherited Recipe is from %s, in %s", spec["package"], spec["inherits_body"][0])
-        return resolveRecipeInheritance(inherit_file, visited)
-    return None, recipe
-    
+        return (err, None)
+
+    if header_spec and isinstance(header_spec, dict) and "inherits_body" in header_spec:
+        inherit_list = header_spec.get("inherits_body") or []
+        if inherit_list:
+            if recipe_body and recipe_body.strip():
+                warning("Recipe in %s is not empty and will be ignored due to inheritance from %s in %s", header_spec.get("package"), header_spec.get("package"), inherit_list[0])
+            inherit_repo = inherit_list[0]
+            inherit_file = os.path.join(os.environ.get("BITS_REPO_DIR", ""), inherit_repo, header_spec['package'] + '.sh')
+            debug("resolveRecipeInheritance: delegating to %s (package=%s)", inherit_file, header_spec.get("package"))
+            return resolveRecipeInheritance(inherit_file, visited)
+
+    return (None, recipe_body)
+
+
 def parseRecipe(reader):
-    assert(reader.__call__)
-    err, spec, recipe = (None, None, None)
+    assert callable(reader), "reader must be callable"
+    err = None
+    spec = None
+    recipe = None
+
     try:
-        d = reader()
-        header, recipe = d.split("---", 1)
-        spec = yamlLoad(header)
+        raw = reader()
+        header_text, recipe = raw.split('---', 1)
+        spec = yamlLoad(header_text)
         validateSpec(spec)
     except RuntimeError as e:
         err = str(e)
     except IOError as e:
         err = str(e)
     except SpecError as e:
-        err = "Malformed header for %s\n%s" % (reader.url, str(e))
-    except yaml.scanner.ScannerError as e:
-        err = "Unable to parse %s\n%s" % (reader.url, str(e))
-    except yaml.parser.ParserError as e:
-        err = "Unable to parse %s\n%s" % (reader.url, str(e))
+        # Reader objects may not always expose a .url attribute; guard accordingly
+        reader_url = getattr(reader, 'url', '<unknown>')
+        err = "Malformed header for %s\n%s" % (reader_url, str(e))
+    except (yaml.scanner.ScannerError, yaml.parser.ParserError) as e:
+        reader_url = getattr(reader, 'url', '<unknown>')
+        err = "Unable to parse %s\n%s" % (reader_url, str(e))
     except ValueError:
-        err = "Unable to parse %s. Header missing." % reader.url
+        reader_url = getattr(reader, 'url', '<unknown>')
+        err = "Unable to parse %s. Header missing." % reader_url
 
-    if spec and "merge_policy" in spec:
-      merge_policy = spec.pop("merge_policy", None) if spec else None
-      debug("&&&merge_policy is %s", merge_policy)
+    # If parsing the header failed, return the error immediately
+    if err:
+        return (err, spec, recipe)
+    # Handle 'from' inheritance that merges headers (metadata)
+    if spec and 'from' in spec:
+        try:
+            # The previous implementation assumed the referenced recipe lives under BITS_REPO_DIR/<from>[0]/<package>.sh
+            inherited_path = os.path.join(os.environ.get('BITS_REPO_DIR', ''), spec['from'][0], spec['package'] + '.sh')
+            inh_err, inh_recipe, inherited_spec = getInheritedRecipe(inherited_path)
+            if inh_err:
+                raise RuntimeError(inh_err)
+            merged_spec = mergeHeader(spec, inherited_spec)
+            spec = merged_spec
+        except Exception as e:
+            # Bubble up as runtime error string to keep compatibility with older behaviour
+            return (str(e), None, None)
 
-    if spec and "from" in spec: 
-      inherited_err, inherited_recipe, inherited_spec = getInheritedRecipe(os.path.join(os.environ.get("BITS_REPO_DIR"), spec["from"][0])+ "/" + spec['package'] + '.sh')
-      merged_spec = mergeHeaders(spec, inherited_spec, merge_policy)
-      spec = merged_spec
+    # Handle 'inherits_body' semantics: fetch/return the inherited recipe body
+    if spec and 'inherits_body' in spec:
+        inherit_repo = spec['inherits_body'][0]
+        inherit_file = os.path.join(os.environ.get('BITS_REPO_DIR', ''), inherit_repo, spec['package'] + '.sh')
+        inherited_err, inherited_recipe = resolveRecipeInheritance(inherit_file)
+        if inherited_err:
+            dieOnError("Error while resolving inheritance: %s", inherited_err)
+        return (inherited_err, spec, inherited_recipe)
 
-    if spec and "inherits_body" in spec:
-      inherited_err, inherited_recipe=resolveRecipeInheritance(os.path.join(os.environ.get("BITS_REPO_DIR"), spec["inherits_body"][0])+ "/" + spec['package'] + '.sh')
-      if inherited_err:
-        dieOnError("Error while resolving inheritance: %s", inherited_err)
-      return inherited_err, spec, inherited_recipe
-    return err, spec, recipe
+    return (err, spec, recipe)
+
 
 # (Almost pure part of the defaults parsing)
 # Override defaultsGetter for unit tests.
