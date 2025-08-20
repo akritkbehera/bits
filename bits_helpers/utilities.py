@@ -659,7 +659,7 @@ def getInheritedRecipe(file_path, visited=None):
         visited = set()
 
     if file_path in visited:
-        return (f"Circular dependency detected involving {file_path}", None, None)
+        return (f"Circular dependency detected involving {file_path}", None, None, visited)
 
     visited.add(file_path)
 
@@ -668,18 +668,18 @@ def getInheritedRecipe(file_path, visited=None):
             content = f.read()
     except IOError as e:
         debug("getInheritedRecipe: failed to read %s: %s", file_path, e)
-        return (str(e), None, None)
+        return (str(e), None, None, visited)
 
     try:
         header_text, recipe_body = content.split("---", 1)
     except ValueError:
-        return ("Unable to parse %s. Header missing." % file_path, None, None)
+        return (f"Unable to parse {file_path}. Header missing.", None, None, visited)
 
     try:
         header_spec = yamlLoad(header_text)
     except Exception as e:
         debug("getInheritedRecipe: YAML parsing error for %s: %s", file_path, e)
-        return (str(e), None, None)
+        return (str(e), None, None, visited)
 
     debug("&&&getInheritedRecipe: file_path=%s, header_spec=%s", file_path, header_spec)
     return (None, recipe_body, header_spec, visited)
@@ -691,20 +691,19 @@ def resolveRecipeInheritance(file, visited=None):
         return (err, None)
 
     if header_spec and isinstance(header_spec, dict) and "inherits_body" in header_spec:
-        inherit_list = header_spec.get("inherits_body") or []
-        if inherit_list:
+        if header_spec["inherits_body"]:
             if recipe_body and recipe_body.strip():
                 warning(
                     "Recipe in %s is not empty and will be ignored due to inheritance from %s in %s",
                     header_spec.get("package"),
                     header_spec.get("package"),
-                    inherit_list[0],
+                    header_spec["inherits_body"],
                 )
 
             inherit_repo = inherit_list[0]
             inherit_file = os.path.join(
                 os.environ.get("BITS_REPO_DIR", ""),
-                inherit_repo,
+                header_spec["inherits_body"],
                 header_spec["package"] + ".sh",
             )
             debug(
@@ -767,7 +766,7 @@ def parseRecipe(reader):
         inherited_err, recipe = resolveRecipeInheritance(
             os.path.join(
                 os.environ.get("BITS_REPO_DIR", ""),
-                spec["inherits_body"][0],
+                spec["inherits_body"],
                 spec["package"] + ".sh",
             )
         )
