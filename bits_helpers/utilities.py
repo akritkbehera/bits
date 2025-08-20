@@ -279,7 +279,7 @@ def doDetectArch(hasOsRelease, osReleaseLines, platformTuple, platformSystem, pl
 # possibly compatible linux distributions, but tries to get right the
 # common one, obvious one. If you use a Unknownbuntu which is compatible
 # with Ubuntu 15.10 you will still have to give an explicit platform
-# string. 
+# string.
 #
 # FIXME: we should have a fallback for lsb_release, since platform.dist
 # is going away.
@@ -409,188 +409,182 @@ def yamlLoad(s):
   return yaml.load(s, YamlSafeOrderedLoader)
 
 def yamlDump(s):
-  class YamlOrderedDumper(yaml.SafeDumper):
-    pass
-  def represent_ordereddict(dumper, data):
-    rep = []
-    for k,v in data.items():
-      k = dumper.represent_data(k)
-      v = dumper.represent_data(v)
-      rep.append((k, v))
-    return yaml.nodes.MappingNode(u'tag:yaml.org,2002:map', rep)
-  YamlOrderedDumper.add_representer(OrderedDict, represent_ordereddict)
-  return yaml.dump(s, Dumper=YamlOrderedDumper)
+    class YamlOrderedDumper(yaml.SafeDumper):
+        pass
+    def represent_ordereddict(dumper, data):
+        rep = []
+        for k,v in data.items():
+            k = dumper.represent_data(k)
+            v = dumper.represent_data(v)
+            rep.append((k, v))
+        return yaml.nodes.MappingNode(u'tag:yaml.org,2002:map', rep)
+    YamlOrderedDumper.add_representer(OrderedDict, represent_ordereddict)
+    return yaml.dump(s, Dumper=YamlOrderedDumper)
 
-def get_from(spec):
-    f = spec.get("from")
-    if isinstance(f, list) and f and isinstance(f[0], str):
-        return f[0]
-    raise ValueError(f"Invalid 'from' format: {f}")
 
-def mergeHeader(override_spec, base, mergePolicy=None, visited=None):
-    debug("type(override_spec) is %s, type(base) is %s", type(override_spec), type(base))
-    if visited is None:
-        visited = set()
-  
+def mergeHeader(override_spec, path_to_base_spec, mergePolicy=None, visited=None):
+    base_err, base_body, base, updated_visited = getInheritedRecipe(path_to_base_spec, visited)
+    
+    debug(
+        "type(override_spec) is %s, type(base) is %s", type(override_spec), type(base)
+    )
+    
+    if base_err:
+        raise RuntimeError(f"Error reading base spec from {path_to_base_spec}: {base_err}")
+    
     if not isinstance(override_spec, dict):
         raise ValueError("override_spec must be a dictionary")
     if base is None:
         raise ValueError("Base spec is required for merging headers")
     if not isinstance(base, dict):
         raise ValueError("Base must be a dictionary")
-    
-    # Extract merge policy from override_spec if present, otherwise use provided policy
-    mergePolicy = override_spec.pop("merge_policy", mergePolicy or {})
-    
-    # Validate that both specs have required fields
+    if mergePolicy is None:
+        raise ValueError("mergePolicy must be provided for merging headers")
     if "from" not in override_spec or not override_spec["from"]:
         raise ValueError("override_spec must have a 'from' field")
-    if "package" not in override_spec:
-        raise ValueError("override_spec must have a 'package' field")
-    if "package" not in base:
-        raise ValueError("base must have a 'package' field")
-    
-    # Check for package compatibility
     if override_spec["package"] != base["package"]:
         raise ValueError(
             f"Cannot merge headers of different packages: {override_spec['package']} != {base['package']}"
         )
     
-    # Circular dependency detection
-    override_repo = override_spec["from"][0] if isinstance(override_spec["from"], list) else override_spec["from"]
-    if override_repo in visited:
-        raise RuntimeError(f"Circular merge detected involving repo: {override_repo}")
-    
-    debug("&&&mergeHeader: override_spec is %s, base is %s", 
-          override_spec.get('from', ['unknown'])[0], 
-          base.get('from', ['unknown'])[0])
-
-    visited.add(override_repo)
+    debug(
+        "&&&mergeHeader: override_spec is %s, base is %s",
+        override_spec.get("from", ["unknown"])[0],
+        base.get("from", ["unknown"])[0],
+    )
     
     try:
         if "from" not in base or not base["from"]:
             final_base = base.copy()
         else:
-            base_repo = base["from"][0] if isinstance(base["from"], list) else base["from"]
-            
-            if base_repo in visited:
-                raise RuntimeError(f"Circular merge detected involving repo: {base_repo}")
-            
-            try:
-                repo_dir = os.environ.get('BITS_REPO_DIR', '')
-                recipe_path = os.path.join(repo_dir, base_repo, base['package'] + '.sh')
-                err, body, base_from_spec = getInheritedRecipe(recipe_path)
-                
-                if err or not base_from_spec:
-                    raise ValueError(f"Failed to load inherited recipe from {recipe_path}")
-                
-                final_base = mergeHeader(base, base_from_spec, base.get("merge_policy", {}), visited.copy())
-                
-            except Exception as e:
-                raise ValueError(f"Error loading base specification: {e}")
+            base_repo = (
+                base["from"][0] if isinstance(base["from"], list) else base["from"]
+            )
+            base_path = os.path.join(
+                os.environ.get("BITS_REPO_DIR", ""),
+                base_repo,
+                base["package"] + ".sh",
+            )
+            final_base = mergeHeader(
+                base,
+                base_path,
+                base.get("merge_policy", {}),
+                updated_visited,
+            )
         
-        inherit_keys = mergePolicy.get("inherit", [])
-        if inherit_keys is None:
-            inherit_keys = []
-        elif isinstance(inherit_keys, str):
-            inherit_keys = [inherit_keys]
-        
-        append_keys = mergePolicy.get("append", [])
-        if append_keys is None:
-            append_keys = []
-        elif isinstance(append_keys, str):
-            append_keys = [append_keys]
-        
-        debug("&&&mergeHeader: inherit_keys is %s, append_keys is %s", inherit_keys, append_keys)
-        
-        # Apply merge rules
-        for key, val in override_spec.items():
-            debug("&&&key/value: key is %s, val is %s", key, val)
-            
-            if key in append_keys and key in final_base:
-                # Append logic based on data type
-                if isinstance(final_base[key], dict) and isinstance(val, dict):
-                    # For dictionaries, update (merge) them
-                    final_base[key] = final_base[key].copy()  # Avoid modifying original
-                    final_base[key].update(val)
-                elif isinstance(final_base[key], list) and isinstance(val, list):
-                    # For lists, extend them
-                    final_base[key] = final_base[key].copy()  # Avoid modifying original
-                    final_base[key].extend(val)
-                elif isinstance(final_base[key], str) and isinstance(val, str):
-                    # For strings, concatenate them
-                    final_base[key] = final_base[key] + val
-                else:
-                    # For different types, override
-                    final_base[key] = val
-            elif key in inherit_keys:
-                # Inherit logic: only set if not already present in override
-                if key not in final_base:
-                    final_base[key] = val
-                else:
-                    # Warn if key exists in both and we're inheriting
-                    warning("Key '%s' is present in both base and override spec. Using value from override spec. Remove field to keep base value.", key)
+        mergedHeader = handleMergePolicy(override_spec, final_base, mergePolicy)
+        return mergedHeader
+    except Exception as e:
+        raise RuntimeError(f"Error during header merge: {e}")
+
+
+def handleMergePolicy(override_spec, final_base, mergePolicy):
+    inherit_keys = mergePolicy.get("inherit", [])
+    if inherit_keys is None:
+        inherit_keys = []
+    elif isinstance(inherit_keys, str):
+        inherit_keys = [inherit_keys]
+
+    append_keys = mergePolicy.get("append", [])
+    if append_keys is None:
+        append_keys = []
+    elif isinstance(append_keys, str):
+        append_keys = [append_keys]
+
+    debug(
+        "&&&mergeHeader: inherit_keys is %s, append_keys is %s",
+        inherit_keys,
+        append_keys,
+    )
+
+    for key, val in override_spec.items():
+        debug("&&&key/value: key is %s, val is %s", key, val)
+
+        if key in append_keys and key in final_base:
+            # Append logic based on data type
+            if isinstance(final_base[key], dict) and isinstance(val, dict):
+                # For dictionaries, update (merge) them
+                final_base[key] = final_base[key].copy()  # Avoid modifying original
+                final_base[key].update(val)
+            elif isinstance(final_base[key], list) and isinstance(val, list):
+                # For lists, extend them
+                final_base[key] = final_base[key].copy()  # Avoid modifying original
+                final_base[key].extend(val)
+            elif isinstance(final_base[key], str) and isinstance(val, str):
+                # For strings, concatenate them
+                final_base[key] = final_base[key] + val
             else:
-                # Default behavior: override
+                # For different types, override
                 final_base[key] = val
-        
-        # Handle inherited keys that should be preserved from base
-        for key in inherit_keys:
-            if key in final_base and key not in override_spec:
-                # Key exists in base but not in override, keep base value
-                pass  # Already in final_base, no action needed
-        
-        return final_base
-        
-    finally:
-        # Clean up visited set (remove current repo when backtracking)
-        visited.discard(override_repo)
+        elif key in inherit_keys:
+            # Inherit logic: only set if not already present in override
+            if key not in final_base:
+                final_base[key] = val
+            else:
+
+                warning(
+                    "Key '%s' is present in both base and override spec. Using value from override spec. Remove field to keep base value.",
+                    key,
+                )
+        else:
+            # Default behavior: override
+            final_base[key] = val
+
+    for key in inherit_keys:
+        if key in final_base and key not in override_spec:
+            pass
+
+    return final_base
 
 
-def getInheritedRecipe(file_path):
+def getInheritedRecipe(file_path, visited=None):
+    if visited is None:
+        visited = set()
+    
+    if file_path in visited:
+        return (f"Circular dependency detected involving {file_path}", None, None)
+    
+    visited.add(file_path)
+    
     try:
         with open(file_path, 'r') as f:
             content = f.read()
     except IOError as e:
         debug("getInheritedRecipe: failed to read %s: %s", file_path, e)
         return (str(e), None, None)
-
+    
     try:
         header_text, recipe_body = content.split('---', 1)
     except ValueError:
         return ("Unable to parse %s. Header missing." % file_path, None, None)
-
+    
     try:
         header_spec = yamlLoad(header_text)
     except Exception as e:
         debug("getInheritedRecipe: YAML parsing error for %s: %s", file_path, e)
         return (str(e), None, None)
-
+    
     debug("&&&getInheritedRecipe: file_path=%s, header_spec=%s", file_path, header_spec)
-    return (None, recipe_body, header_spec)
+    return (None, recipe_body, header_spec, visited)
 
 
 def resolveRecipeInheritance(file, visited=None):
-    if visited is None:
-        visited = set()
-    if file in visited:
-        return (f"Circular dependency detected involving {file}", None)
-    visited.add(file)
-
-    err, recipe_body, header_spec = getInheritedRecipe(file)
+    err, recipe_body, header_spec, updated_visited = getInheritedRecipe(file, visited)
     if err:
         return (err, None)
-
+    
     if header_spec and isinstance(header_spec, dict) and "inherits_body" in header_spec:
         inherit_list = header_spec.get("inherits_body") or []
         if inherit_list:
             if recipe_body and recipe_body.strip():
-                warning("Recipe in %s is not empty and will be ignored due to inheritance from %s in %s", header_spec.get("package"), header_spec.get("package"), inherit_list[0])
+                warning("Recipe in %s is not empty and will be ignored due to inheritance from %s in %s", 
+                       header_spec.get("package"), header_spec.get("package"), inherit_list[0])
+            
             inherit_repo = inherit_list[0]
             inherit_file = os.path.join(os.environ.get("BITS_REPO_DIR", ""), inherit_repo, header_spec['package'] + '.sh')
             debug("resolveRecipeInheritance: delegating to %s (package=%s)", inherit_file, header_spec.get("package"))
-            return resolveRecipeInheritance(inherit_file, visited)
-
+            return resolveRecipeInheritance(inherit_file, updated_visited)
+    
     return (None, recipe_body)
 
 
@@ -623,29 +617,21 @@ def parseRecipe(reader):
     # If parsing the header failed, return the error immediately
     if err:
         return (err, spec, recipe)
+    
     # Handle 'from' inheritance that merges headers (metadata)
     if spec and 'from' in spec:
-        try:
-            # The previous implementation assumed the referenced recipe lives under BITS_REPO_DIR/<from>[0]/<package>.sh
-            inherited_path = os.path.join(os.environ.get('BITS_REPO_DIR', ''), spec['from'][0], spec['package'] + '.sh')
-            inh_err, inh_recipe, inherited_spec = getInheritedRecipe(inherited_path)
-            if inh_err:
-                raise RuntimeError(inh_err)
-            merged_spec = mergeHeader(spec, inherited_spec)
-            spec = merged_spec
-        except Exception as e:
-            # Bubble up as runtime error string to keep compatibility with older behaviour
-            return (str(e), None, None)
+        mergePolicy = spec.pop("merge_policy")
+        spec = mergeHeader(spec, os.path.join(os.environ.get('BITS_REPO_DIR', ''), spec['from'][0], spec['package'] + '.sh'), mergePolicy)
+        debug("&&&parseRecipe: inh_spec is %s", spec)
 
     # Handle 'inherits_body' semantics: fetch/return the inherited recipe body
     if spec and 'inherits_body' in spec:
         inherit_repo = spec['inherits_body'][0]
         inherit_file = os.path.join(os.environ.get('BITS_REPO_DIR', ''), inherit_repo, spec['package'] + '.sh')
-        inherited_err, inherited_recipe = resolveRecipeInheritance(inherit_file)
+        inherited_err, recipe = resolveRecipeInheritance(inherit_file)
         if inherited_err:
             dieOnError("Error while resolving inheritance: %s", inherited_err)
-        return (inherited_err, spec, inherited_recipe)
-
+        
     return (err, spec, recipe)
 
 
@@ -719,7 +705,7 @@ def resolveFilename(taps, pkg, configDir, genPackages):
       return(filename,os.path.abspath(d))
 
   dieOnError(True, "Package %s not found in %s" % (pkg, configDir))
-    
+
 def resolveDefaultsFilename(defaults, configDir):
   configPath = os.environ.get("BITS_PATH")
   cfgDir = configDir
@@ -742,7 +728,7 @@ def resolveDefaultsFilename(defaults, configDir):
            "\n".join("- " + basename(x).replace("defaults-", "").replace(".sh", "")
                      for x in glob(join(configDir, "defaults-*.sh")))))
   '''
-  
+
 def getPackageList(packages, specs, configDir, preferSystem, noSystem,
                    architecture, disable, defaults, performPreferCheck, performRequirementCheck,
                    performValidateDefaults, overrides, taps, log, force_rebuild=()):
