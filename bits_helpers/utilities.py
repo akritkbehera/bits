@@ -21,259 +21,315 @@ from bits_helpers.log import error, warning, dieOnError, debug
 
 
 class SpecError(Exception):
-  pass
+    pass
 
 
 def call_ignoring_oserrors(function, *args, **kwargs):
-  try:
-    return function(*args, **kwargs)
-  except OSError:
-    return None
+    try:
+        return function(*args, **kwargs)
+    except OSError:
+        return None
 
 
 def symlink(link_target, link_name):
-  """Match the behaviour of `ln -nsf LINK_TARGET LINK_NAME`, without having to fork.
+    """Match the behaviour of `ln -nsf LINK_TARGET LINK_NAME`, without having to fork.
 
-  Create a new symlink named LINK_NAME pointing to LINK_TARGET. If LINK_NAME
-  is a directory, create a symlink named basename(LINK_TARGET) inside it.
-  """
-  # If link_name is a symlink pointing to a directory, isdir() will return True.
-  if isdir(link_name) and not islink(link_name):
-    link_name = join(link_name, basename(link_target))
-  call_ignoring_oserrors(os.unlink, link_name)
-  os.symlink(link_target, link_name)
+    Create a new symlink named LINK_NAME pointing to LINK_TARGET. If LINK_NAME
+    is a directory, create a symlink named basename(LINK_TARGET) inside it.
+    """
+    # If link_name is a symlink pointing to a directory, isdir() will return True.
+    if isdir(link_name) and not islink(link_name):
+        link_name = join(link_name, basename(link_target))
+    call_ignoring_oserrors(os.unlink, link_name)
+    os.symlink(link_target, link_name)
 
 
-asList = lambda x : x if type(x) == list else [x]
+asList = lambda x: x if type(x) == list else [x]
 
 
 def topological_sort(specs):
-  """Topologically sort specs so that dependencies come before the packages that depend on them.
+    """Topologically sort specs so that dependencies come before the packages that depend on them.
 
-  This function returns a generator, yielding package names in order.
+    This function returns a generator, yielding package names in order.
 
-  The algorithm used here was adapted from:
-  http://www.stoimen.com/blog/2012/10/01/computer-algorithms-topological-sort-of-a-graph/
-  """
-  edges = [(spec["package"], dep) for spec in specs.values() for dep in spec["requires"]]
-  leaves = [spec["package"] for spec in specs.values() if not spec["requires"]]
-  while leaves:
-    current_package = leaves.pop(0)
-    yield current_package
-    # Find every package that depends on the current one.
-    new_leaves = {pkg for pkg, dep in edges if dep == current_package}
-    # Stop blocking packages that depend on the current one...
-    edges = [(pkg, dep) for pkg, dep in edges if dep != current_package]
-    # ...but keep blocking those that still depend on other stuff!
-    leaves.extend(new_leaves - {pkg for pkg, _ in edges})
-  # If we have any edges left, we have a cycle
-  if edges:
-    # Find a cycle by following dependencies
-    cycle = []
-    start = edges[0][0]  # Start with any remaining package
-    current = start
-    max_iter = 10000 # Prevent infinite loops
-    while max_iter > 0:
-      max_iter -= 1
-      cycle.append(current)
-      # Find what current depends on
-      for pkg, dep in edges:
-        if pkg == current:
-          current = dep
-          break
-      if current in cycle:  # We found a cycle
-        cycle = cycle[cycle.index(current):]  # Trim to just the cycle
-        dieOnError(True, "Dependency cycle detected: " + " -> ".join(cycle + [cycle[0]]))
-      if current == start:  # We've gone full circle
-        raise RuntimeError("Internal error: cycle detection failed")
-    assert False, "Unreachable error: cycle detection failed"
+    The algorithm used here was adapted from:
+    http://www.stoimen.com/blog/2012/10/01/computer-algorithms-topological-sort-of-a-graph/
+    """
+    edges = [
+        (spec["package"], dep) for spec in specs.values() for dep in spec["requires"]
+    ]
+    leaves = [spec["package"] for spec in specs.values() if not spec["requires"]]
+    while leaves:
+        current_package = leaves.pop(0)
+        yield current_package
+        # Find every package that depends on the current one.
+        new_leaves = {pkg for pkg, dep in edges if dep == current_package}
+        # Stop blocking packages that depend on the current one...
+        edges = [(pkg, dep) for pkg, dep in edges if dep != current_package]
+        # ...but keep blocking those that still depend on other stuff!
+        leaves.extend(new_leaves - {pkg for pkg, _ in edges})
+    # If we have any edges left, we have a cycle
+    if edges:
+        # Find a cycle by following dependencies
+        cycle = []
+        start = edges[0][0]  # Start with any remaining package
+        current = start
+        max_iter = 10000  # Prevent infinite loops
+        while max_iter > 0:
+            max_iter -= 1
+            cycle.append(current)
+            # Find what current depends on
+            for pkg, dep in edges:
+                if pkg == current:
+                    current = dep
+                    break
+            if current in cycle:  # We found a cycle
+                cycle = cycle[cycle.index(current) :]  # Trim to just the cycle
+                dieOnError(
+                    True,
+                    "Dependency cycle detected: " + " -> ".join(cycle + [cycle[0]]),
+                )
+            if current == start:  # We've gone full circle
+                raise RuntimeError("Internal error: cycle detection failed")
+        assert False, "Unreachable error: cycle detection failed"
 
 
 def resolve_store_path(architecture, spec_hash):
-  """Return the path where a tarball with the given hash is to be stored.
+    """Return the path where a tarball with the given hash is to be stored.
 
-  The returned path is relative to the working directory (normally sw/) or the
-  root of the remote store.
-  """
-  return "/".join(("TARS", architecture, "store", spec_hash[:2], spec_hash))
+    The returned path is relative to the working directory (normally sw/) or the
+    root of the remote store.
+    """
+    return "/".join(("TARS", architecture, "store", spec_hash[:2], spec_hash))
 
 
 def resolve_links_path(architecture, package):
-  """Return the path where symlinks for the given package are to be stored.
+    """Return the path where symlinks for the given package are to be stored.
 
-  The returned path is relative to the working directory (normally sw/) or the
-  root of the remote store.
-  """
-  return "/".join(("TARS", architecture, package))
+    The returned path is relative to the working directory (normally sw/) or the
+    root of the remote store.
+    """
+    return "/".join(("TARS", architecture, package))
 
 
 def short_commit_hash(spec):
-  """Shorten the spec's commit hash to make it more human-readable.
+    """Shorten the spec's commit hash to make it more human-readable.
 
-  This is complicated by the fact that the commit_hash property is not
-  necessarily a commit hash, but might be a tag name. If it is a tag name,
-  return it as-is, else assume it is actually a commit hash and shorten it.
-  """
-  if spec["tag"] == spec["commit_hash"]:
-    return spec["commit_hash"]
-  return spec["commit_hash"][:10]
+    This is complicated by the fact that the commit_hash property is not
+    necessarily a commit hash, but might be a tag name. If it is a tag name,
+    return it as-is, else assume it is actually a commit hash and shorten it.
+    """
+    if spec["tag"] == spec["commit_hash"]:
+        return spec["commit_hash"]
+    return spec["commit_hash"][:10]
 
 
 # Date fields to substitute: they are zero-padded
 now = datetime.now()
-nowKwds = { "year": str(now.year),
-            "month": str(now.month).zfill(2),
-            "day": str(now.day).zfill(2),
-            "hour": str(now.hour).zfill(2) }
+nowKwds = {
+    "year": str(now.year),
+    "month": str(now.month).zfill(2),
+    "day": str(now.day).zfill(2),
+    "hour": str(now.hour).zfill(2),
+}
+
 
 def resolve_spec_data(spec, data, defaults, branch_basename="", branch_stream=""):
-  """Expand the data replacing the following keywords:
+    """Expand the data replacing the following keywords:
 
-  - %(package)s
-  - %(commit_hash)s
-  - %(short_hash)s
-  - %(tag)s
-  - %(branch_basename)s
-  - %(branch_stream)s
-  - %(tag_basename)s
-  - %(defaults_upper)s
-  - %(version)s
-  - %(root_dir)s
-  - %(year)s
-  - %(month)s
-  - %(day)s
-  - %(hour)s
+    - %(package)s
+    - %(commit_hash)s
+    - %(short_hash)s
+    - %(tag)s
+    - %(branch_basename)s
+    - %(branch_stream)s
+    - %(tag_basename)s
+    - %(defaults_upper)s
+    - %(version)s
+    - %(root_dir)s
+    - %(year)s
+    - %(month)s
+    - %(day)s
+    - %(hour)s
 
-  with the calculated content.
-  """
-  defaults_upper = defaults != "release" and "_" + defaults.upper().replace("-", "_") or ""
-  commit_hash = spec.get("commit_hash", "hash_unknown")
-  tag = str(spec.get("tag", "tag_unknown"))
-  package = spec.get("package")
-  all_vars = {
-    "package": package,
-    "root_dir": "${%s_ROOT}" % package.upper().replace("-","_"),
-    "commit_hash": commit_hash,
-    "short_hash": commit_hash[0:10],
-    "tag": tag,
-    "branch_basename": branch_basename,
-    "branch_stream": branch_stream or tag,
-    "tag_basename": basename(tag),
-    "defaults_upper": defaults_upper,
-    "version": str(spec.get("version", "version_unknown")),
-    "platform_machine": platform.machine(),
-    "sys_platform": sys.platform,
-    "os_name": os.name,
-    **nowKwds,
-  }
-  for k, v in spec.get("variables",{}).items():
-    all_vars[k] = v
+    with the calculated content.
+    """
+    defaults_upper = (
+        defaults != "release" and "_" + defaults.upper().replace("-", "_") or ""
+    )
+    commit_hash = spec.get("commit_hash", "hash_unknown")
+    tag = str(spec.get("tag", "tag_unknown"))
+    package = spec.get("package")
+    all_vars = {
+        "package": package,
+        "root_dir": "${%s_ROOT}" % package.upper().replace("-", "_"),
+        "commit_hash": commit_hash,
+        "short_hash": commit_hash[0:10],
+        "tag": tag,
+        "branch_basename": branch_basename,
+        "branch_stream": branch_stream or tag,
+        "tag_basename": basename(tag),
+        "defaults_upper": defaults_upper,
+        "version": str(spec.get("version", "version_unknown")),
+        "platform_machine": platform.machine(),
+        "sys_platform": sys.platform,
+        "os_name": os.name,
+        **nowKwds,
+    }
+    for k, v in spec.get("variables", {}).items():
+        all_vars[k] = v
 
-  # Support for indirect variable expansion e.g. with
-  # variables:
-  #   v1: foo
-  #   foo_key: bar
-  #   final: %%(%(v1)s_key)s
-  # "final" will have the value "bar" (first expanded to "%(foo_key)s" and
-  # then to value of "foo_key" i.e. "bar")
-  while re.search("\%\([a-zA-Z][a-zA-Z0-9_]*\)s", data):
-    data = data % all_vars
-  return data
+    # Support for indirect variable expansion e.g. with
+    # variables:
+    #   v1: foo
+    #   foo_key: bar
+    #   final: %%(%(v1)s_key)s
+    # "final" will have the value "bar" (first expanded to "%(foo_key)s" and
+    # then to value of "foo_key" i.e. "bar")
+    while re.search("\%\([a-zA-Z][a-zA-Z0-9_]*\)s", data):
+        data = data % all_vars
+    return data
+
 
 def resolve_version(spec, defaults, branch_basename, branch_stream):
-    return resolve_spec_data(spec, spec["version"], defaults, branch_basename, branch_stream)
+    return resolve_spec_data(
+        spec, spec["version"], defaults, branch_basename, branch_stream
+    )
+
 
 def resolve_tag(spec):
-  """Expand the tag, replacing the following keywords:
-  - %(year)s
-  - %(month)s
-  - %(day)s
-  - %(hour)s
-  """
-  return spec["tag"] % nowKwds
+    """Expand the tag, replacing the following keywords:
+    - %(year)s
+    - %(month)s
+    - %(day)s
+    - %(hour)s
+    """
+    return spec["tag"] % nowKwds
 
 
 def normalise_multiple_options(option, sep=","):
-  return [x for x in ",".join(option).split(sep) if x]
+    return [x for x in ",".join(option).split(sep) if x]
+
 
 def prunePaths(workDir):
-  for x in ["PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"]:
-    if x not in os.environ:
-      continue
-    workDirEscaped = re.escape("%s" % workDir) + "[^:]*:?"
-    os.environ[x] = re.sub(workDirEscaped, "", os.environ[x])
-  for x in list(os.environ.keys()):
-    if x.endswith("_VERSION") and x != "BITS_VERSION":
-      os.environ.pop(x)
+    for x in ["PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"]:
+        if x not in os.environ:
+            continue
+        workDirEscaped = re.escape("%s" % workDir) + "[^:]*:?"
+        os.environ[x] = re.sub(workDirEscaped, "", os.environ[x])
+    for x in list(os.environ.keys()):
+        if x.endswith("_VERSION") and x != "BITS_VERSION":
+            os.environ.pop(x)
+
 
 def validateSpec(spec):
-  if not spec:
-    raise SpecError("Empty recipe.")
-  if type(spec) != OrderedDict:
-    raise SpecError("Not a YAML key / value.")
-  if "package" not in spec:
-    raise SpecError("Missing package field in header.")
+    if not spec:
+        raise SpecError("Empty recipe.")
+    if type(spec) != OrderedDict:
+        raise SpecError("Not a YAML key / value.")
+    if "package" not in spec:
+        raise SpecError("Missing package field in header.")
+
 
 # Use this to check if a given spec is compatible with the given default
 def validateDefaults(finalPkgSpec, defaults):
-  if "valid_defaults" not in finalPkgSpec:
-    return (True, "", [])
-  validDefaults = asList(finalPkgSpec["valid_defaults"])
-  nonStringDefaults = [x for x in validDefaults if not type(x) == str]
-  if nonStringDefaults:
-    return (False, "valid_defaults needs to be a string or a list of strings. Found %s." % nonStringDefaults, [])
-  if defaults in validDefaults:
-    return (True, "", validDefaults)
-  return (False, "Cannot compile %s with `%s' default. Valid defaults are\n%s" % 
-                  (finalPkgSpec["package"],
-                   defaults,
-                   "\n".join([" - " + x for x in validDefaults])), validDefaults)
+    if "valid_defaults" not in finalPkgSpec:
+        return (True, "", [])
+    validDefaults = asList(finalPkgSpec["valid_defaults"])
+    nonStringDefaults = [x for x in validDefaults if not type(x) == str]
+    if nonStringDefaults:
+        return (
+            False,
+            "valid_defaults needs to be a string or a list of strings. Found %s."
+            % nonStringDefaults,
+            [],
+        )
+    if defaults in validDefaults:
+        return (True, "", validDefaults)
+    return (
+        False,
+        "Cannot compile %s with `%s' default. Valid defaults are\n%s"
+        % (
+            finalPkgSpec["package"],
+            defaults,
+            "\n".join([" - " + x for x in validDefaults]),
+        ),
+        validDefaults,
+    )
 
 
-def doDetectArch(hasOsRelease, osReleaseLines, platformTuple, platformSystem, platformProcessor):
-  if platformSystem == "Darwin":
+def doDetectArch(
+    hasOsRelease, osReleaseLines, platformTuple, platformSystem, platformProcessor
+):
+    if platformSystem == "Darwin":
+        processor = platformProcessor
+        if not processor:
+            if platform.machine() == "x86_64":
+                processor = "x86-64"
+            else:
+                processor = "arm64"
+        return "osx_%s" % processor.replace("_", "-")
+    distribution, version, flavour = platformTuple
+    distribution = distribution.lower()
+    # If platform.dist does not return something sensible,
+    # let's try with /etc/os-release
+    if (
+        distribution
+        not in [
+            "ubuntu",
+            "red hat enterprise linux",
+            "redhat",
+            "centos",
+            "almalinux",
+            "rockylinux",
+        ]
+        and hasOsRelease
+    ):
+        for x in osReleaseLines:
+            key, is_prop, val = x.partition("=")
+            if not is_prop:
+                continue
+            val = val.strip('\n "')
+            if key == "ID":
+                distribution = val.lower()
+            if key == "VERSION_ID":
+                version = val
+
+    if distribution == "ubuntu":
+        major, _, minor = version.partition(".")
+        version = major + minor
+    elif distribution == "debian":
+        # http://askubuntu.com/questions/445487/which-ubuntu-version-is-equivalent-to-debian-squeeze
+        debian_ubuntu = {
+            "7": "1204",
+            "8": "1404",
+            "9": "1604",
+            "10": "1804",
+            "11": "2004",
+        }
+        if version in debian_ubuntu:
+            distribution = "ubuntu"
+            version = debian_ubuntu[version]
+    elif distribution in [
+        "redhat",
+        "red hat enterprise linux",
+        "centos",
+        "almalinux",
+        "rockylinux",
+    ]:
+        distribution = "slc"
+
     processor = platformProcessor
     if not processor:
-      if platform.machine() == "x86_64":
-        processor = "x86-64"
-      else:
-        processor = "arm64"
-    return "osx_%s" % processor.replace("_", "-")
-  distribution, version, flavour = platformTuple
-  distribution = distribution.lower()
-  # If platform.dist does not return something sensible,
-  # let's try with /etc/os-release
-  if distribution not in ["ubuntu", "red hat enterprise linux", "redhat", "centos", "almalinux", "rockylinux"] and hasOsRelease:
-    for x in osReleaseLines:
-      key, is_prop, val = x.partition("=")
-      if not is_prop:
-        continue
-      val = val.strip("\n \"")
-      if key == "ID":
-        distribution = val.lower()
-      if key == "VERSION_ID":
-        version = val
+        # Sometimes platform.processor returns an empty string
+        processor = getoutput(("uname", "-m")).strip()
 
-  if distribution == "ubuntu":
-    major, _, minor = version.partition(".")
-    version = major + minor
-  elif distribution == "debian":
-    # http://askubuntu.com/questions/445487/which-ubuntu-version-is-equivalent-to-debian-squeeze
-    debian_ubuntu = {"7": "1204", "8": "1404", "9": "1604", "10": "1804", "11": "2004"}
-    if version in debian_ubuntu:
-      distribution = "ubuntu"
-      version = debian_ubuntu[version]
-  elif distribution in ["redhat", "red hat enterprise linux", "centos", "almalinux", "rockylinux"]:
-    distribution = "slc"
+    return "{distro}{version}_{machine}".format(
+        distro=distribution,
+        version=version.split(".")[0],
+        machine=processor.replace("_", "-"),
+    )
 
-  processor = platformProcessor
-  if not processor:
-    # Sometimes platform.processor returns an empty string
-    processor = getoutput(("uname", "-m")).strip()
-
-  return "{distro}{version}_{machine}".format(
-    distro=distribution, version=version.split(".")[0],
-    machine=processor.replace("_", "-"))
 
 # Try to guess a good platform. This does not try to cover all the
 # possibly compatible linux distributions, but tries to get right the
@@ -284,154 +340,187 @@ def doDetectArch(hasOsRelease, osReleaseLines, platformTuple, platformSystem, pl
 # FIXME: we should have a fallback for lsb_release, since platform.dist
 # is going away.
 def detectArch():
-  try:
-    with open("/etc/os-release") as osr:
-      osReleaseLines = osr.readlines()
-    hasOsRelease = True
-  except (IOError,OSError):
-    osReleaseLines = []
-    hasOsRelease = False
-  try:
-    if platform.system() == "Darwin":
-      if platform.machine() == "x86_64":
-        return "osx_x86-64"
-      else:
-        return "osx_arm64"
-  except:
-    pass
-  try:
-    import distro
-    platformTuple = distro.linux_distribution()
-    platformSystem = platform.system()
-    platformProcessor = platform.processor()
-    if not platformProcessor or " " in platformProcessor:
-      platformProcessor = platform.machine()
-    return doDetectArch(hasOsRelease, osReleaseLines, platformTuple, platformSystem, platformProcessor)
-  except:
-    return doDetectArch(hasOsRelease, osReleaseLines, ["unknown", "", ""], "", "")
+    try:
+        with open("/etc/os-release") as osr:
+            osReleaseLines = osr.readlines()
+        hasOsRelease = True
+    except (IOError, OSError):
+        osReleaseLines = []
+        hasOsRelease = False
+    try:
+        if platform.system() == "Darwin":
+            if platform.machine() == "x86_64":
+                return "osx_x86-64"
+            else:
+                return "osx_arm64"
+    except:
+        pass
+    try:
+        import distro
+
+        platformTuple = distro.linux_distribution()
+        platformSystem = platform.system()
+        platformProcessor = platform.processor()
+        if not platformProcessor or " " in platformProcessor:
+            platformProcessor = platform.machine()
+        return doDetectArch(
+            hasOsRelease,
+            osReleaseLines,
+            platformTuple,
+            platformSystem,
+            platformProcessor,
+        )
+    except:
+        return doDetectArch(hasOsRelease, osReleaseLines, ["unknown", "", ""], "", "")
+
 
 def filterByArchitectureDefaults(arch, defaults, requires):
-  for r in requires:
-    require, matcher = ":" in r and r.split(":", 1) or (r, ".*")
-    if matcher.startswith("defaults="):
-      wanted = matcher[len("defaults="):]
-      if re.match(wanted, defaults):
-        yield require
-    if re.match(matcher, arch):
-      yield require
+    for r in requires:
+        require, matcher = ":" in r and r.split(":", 1) or (r, ".*")
+        if matcher.startswith("defaults="):
+            wanted = matcher[len("defaults=") :]
+            if re.match(wanted, defaults):
+                yield require
+        if re.match(matcher, arch):
+            yield require
+
 
 def disabledByArchitectureDefaults(arch, defaults, requires):
-  for r in requires:
-    require, matcher = ":" in r and r.split(":", 1) or (r, ".*")
-    if matcher.startswith("defaults="):
-      wanted = matcher[len("defaults="):]
-      if not re.match(wanted, defaults):
-        yield require
-    elif not re.match(matcher, arch):
-      yield require
+    for r in requires:
+        require, matcher = ":" in r and r.split(":", 1) or (r, ".*")
+        if matcher.startswith("defaults="):
+            wanted = matcher[len("defaults=") :]
+            if not re.match(wanted, defaults):
+                yield require
+        elif not re.match(matcher, arch):
+            yield require
+
 
 def readDefaults(configDir, defaults, error, architecture):
-  '''
-  defaultsFilename = "%s/defaults-%s.sh" % (configDir, defaults)
-  if not exists(defaultsFilename):
-    error("Default `%s' does not exists. Viable options:\n%s" %
-          (defaults or "<no defaults specified>",
-           "\n".join("- " + basename(x).replace("defaults-", "").replace(".sh", "")
-                     for x in glob(join(configDir, "defaults-*.sh")))))
-  '''
-  defaultsFilename = resolveDefaultsFilename(defaults,configDir)
-  
-  err, defaultsMeta, defaultsBody = parseRecipe(getRecipeReader(defaultsFilename))
-  if err:
-    error(err)
-    sys.exit(1)
-  archDefaults = "%s/defaults-%s.sh" % (configDir, architecture)
-  archMeta = {}
-  archBody = ""
-  if exists(archDefaults):
-    err, archMeta, archBody = parseRecipe(getRecipeReader(defaultsFilename))
+    """
+    defaultsFilename = "%s/defaults-%s.sh" % (configDir, defaults)
+    if not exists(defaultsFilename):
+      error("Default `%s' does not exists. Viable options:\n%s" %
+            (defaults or "<no defaults specified>",
+             "\n".join("- " + basename(x).replace("defaults-", "").replace(".sh", "")
+                       for x in glob(join(configDir, "defaults-*.sh")))))
+    """
+    defaultsFilename = resolveDefaultsFilename(defaults, configDir)
+
+    err, defaultsMeta, defaultsBody = parseRecipe(getRecipeReader(defaultsFilename))
     if err:
-      error(err)
-      sys.exit(1)
-    for x in ["env", "disable", "overrides"]:
-      defaultsMeta.setdefault(x, {}).update(archMeta.get(x, {}))
-    defaultsBody += "\n# Architecture defaults\n" + archBody
-  return (defaultsMeta, defaultsBody)
+        error(err)
+        sys.exit(1)
+    archDefaults = "%s/defaults-%s.sh" % (configDir, architecture)
+    archMeta = {}
+    archBody = ""
+    if exists(archDefaults):
+        err, archMeta, archBody = parseRecipe(getRecipeReader(defaultsFilename))
+        if err:
+            error(err)
+            sys.exit(1)
+        for x in ["env", "disable", "overrides"]:
+            defaultsMeta.setdefault(x, {}).update(archMeta.get(x, {}))
+        defaultsBody += "\n# Architecture defaults\n" + archBody
+    return (defaultsMeta, defaultsBody)
 
 
-def getRecipeReader(url:str , dist=None, genPackages={}):
-  m = re.search(r'^(dist|generate):(.*)@([^@]+)$', url)
-  if m and m.group(1) == "generate":
-    return GeneratedPackage(genPackages[m.group(2)]["command"])
-  elif m and dist:
-    return GitReader(url, dist)
-  else:
-    return FileReader(url)
+def getRecipeReader(url: str, dist=None, genPackages={}):
+    m = re.search(r"^(dist|generate):(.*)@([^@]+)$", url)
+    if m and m.group(1) == "generate":
+        return GeneratedPackage(genPackages[m.group(2)]["command"])
+    elif m and dist:
+        return GitReader(url, dist)
+    else:
+        return FileReader(url)
+
 
 # Generate a recipe of package
 class GeneratedPackage(object):
-  def __init__(self, command) -> None:
-    self.command = command
-  def __call__(self):
-    return  getoutput(self.command).strip()
+    def __init__(self, command) -> None:
+        self.command = command
+
+    def __call__(self):
+        return getoutput(self.command).strip()
+
 
 # Read a recipe from a file
 class FileReader(object):
-  def __init__(self, url) -> None:
-    self.url = url
-  def __call__(self):
-    return open(self.url).read()
+    def __init__(self, url) -> None:
+        self.url = url
+
+    def __call__(self):
+        return open(self.url).read()
+
 
 # Read a recipe from a git repository using git show.
 class GitReader(object):
-  def __init__(self, url, configDir) -> None:
-    self.url, self.configDir = url, configDir
-  def __call__(self):
-    m = re.search(r'^dist:(.*)@([^@]+)$', self.url)
-    fn, gh = m.groups()
-    err, d = git(("show", "{gh}:{fn}.sh".format(gh=gh, fn=fn.lower())),
-                 directory=self.configDir)
-    if err:
-      raise RuntimeError("Cannot read recipe {fn} from reference {gh}.\n"
-                         "Make sure you run first (this will not alter your recipes):\n"
-                         "  cd {dist} && git remote update -p && git fetch --tags"
-                         .format(dist=self.configDir, gh=gh, fn=fn))
-    return d
+    def __init__(self, url, configDir) -> None:
+        self.url, self.configDir = url, configDir
+
+    def __call__(self):
+        m = re.search(r"^dist:(.*)@([^@]+)$", self.url)
+        fn, gh = m.groups()
+        err, d = git(
+            ("show", "{gh}:{fn}.sh".format(gh=gh, fn=fn.lower())),
+            directory=self.configDir,
+        )
+        if err:
+            raise RuntimeError(
+                "Cannot read recipe {fn} from reference {gh}.\n"
+                "Make sure you run first (this will not alter your recipes):\n"
+                "  cd {dist} && git remote update -p && git fetch --tags".format(
+                    dist=self.configDir, gh=gh, fn=fn
+                )
+            )
+        return d
+
 
 def yamlLoad(s):
-  class YamlSafeOrderedLoader(yaml.SafeLoader):
-    pass
-  def construct_mapping(loader, node):
-    loader.flatten_mapping(node)
-    return OrderedDict(loader.construct_pairs(node))
-  YamlSafeOrderedLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-                                        construct_mapping)
-  return yaml.load(s, YamlSafeOrderedLoader)
+    class YamlSafeOrderedLoader(yaml.SafeLoader):
+        pass
+
+    def construct_mapping(loader, node):
+        loader.flatten_mapping(node)
+        return OrderedDict(loader.construct_pairs(node))
+
+    YamlSafeOrderedLoader.add_constructor(
+        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping
+    )
+    return yaml.load(s, YamlSafeOrderedLoader)
+
 
 def yamlDump(s):
     class YamlOrderedDumper(yaml.SafeDumper):
         pass
+
     def represent_ordereddict(dumper, data):
         rep = []
-        for k,v in data.items():
+        for k, v in data.items():
             k = dumper.represent_data(k)
             v = dumper.represent_data(v)
             rep.append((k, v))
-        return yaml.nodes.MappingNode(u'tag:yaml.org,2002:map', rep)
+        return yaml.nodes.MappingNode("tag:yaml.org,2002:map", rep)
+
     YamlOrderedDumper.add_representer(OrderedDict, represent_ordereddict)
     return yaml.dump(s, Dumper=YamlOrderedDumper)
 
 
 def mergeHeader(override_spec, path_to_base_spec, mergePolicy=None, visited=None):
-    base_err, base_body, base, updated_visited = getInheritedRecipe(path_to_base_spec, visited)
-    
+    base_err, base_body, base, updated_visited = getInheritedRecipe(
+        path_to_base_spec, visited
+    )
+    debug("&&&mergeHeader: base is %s", base)
+
     debug(
         "type(override_spec) is %s, type(base) is %s", type(override_spec), type(base)
     )
-    
+
     if base_err:
-        raise RuntimeError(f"Error reading base spec from {path_to_base_spec}: {base_err}")
-    
+        raise RuntimeError(
+            f"Error reading base spec from {path_to_base_spec}: {base_err}"
+        )
+
     if not isinstance(override_spec, dict):
         raise ValueError("override_spec must be a dictionary")
     if base is None:
@@ -446,16 +535,18 @@ def mergeHeader(override_spec, path_to_base_spec, mergePolicy=None, visited=None
         raise ValueError(
             f"Cannot merge headers of different packages: {override_spec['package']} != {base['package']}"
         )
-    
+
     debug(
         "&&&mergeHeader: override_spec is %s, base is %s",
         override_spec.get("from", ["unknown"])[0],
         base.get("from", ["unknown"])[0],
     )
-    
+
     try:
         if "from" not in base or not base["from"]:
-            final_base = base.copy()
+            final_base = base
+            debug("&&&mergeHeader: base has no 'from' field, using it as final_base")
+            debug("&&&mergeHeader: final_base is %s", final_base)
         else:
             base_repo = (
                 base["from"][0] if isinstance(base["from"], list) else base["from"]
@@ -471,7 +562,8 @@ def mergeHeader(override_spec, path_to_base_spec, mergePolicy=None, visited=None
                 base.get("merge_policy", {}),
                 updated_visited,
             )
-        
+            final_base.pop("merge_policy", None)
+
         mergedHeader = handleMergePolicy(override_spec, final_base, mergePolicy)
         return mergedHeader
     except Exception as e:
@@ -479,6 +571,8 @@ def mergeHeader(override_spec, path_to_base_spec, mergePolicy=None, visited=None
 
 
 def handleMergePolicy(override_spec, final_base, mergePolicy):
+    debug("override_spec is %s", override_spec)
+    debug("final_base is %s", final_base)
     inherit_keys = mergePolicy.get("inherit", [])
     if inherit_keys is None:
         inherit_keys = []
@@ -490,6 +584,13 @@ def handleMergePolicy(override_spec, final_base, mergePolicy):
         append_keys = []
     elif isinstance(append_keys, str):
         append_keys = [append_keys]
+    if (
+        "inherits_body" in append_keys
+        or "version" in append_keys
+        or "tag" in append_keys
+        or "source" in append_keys
+    ):
+        raise ValueError("Cannot append single value fields")
 
     debug(
         "&&&mergeHeader: inherit_keys is %s, append_keys is %s",
@@ -497,73 +598,89 @@ def handleMergePolicy(override_spec, final_base, mergePolicy):
         append_keys,
     )
 
-    for key, val in override_spec.items():
-        debug("&&&key/value: key is %s, val is %s", key, val)
+    for k, v in override_spec.items():
+        print(f"{k}: {type(v).__name__}")
 
+    for key, val in override_spec.items():
         if key in append_keys and key in final_base:
             # Append logic based on data type
-            if isinstance(final_base[key], dict) and isinstance(val, dict):
-                # For dictionaries, update (merge) them
-                final_base[key] = final_base[key].copy()  # Avoid modifying original
-                final_base[key].update(val)
-            elif isinstance(final_base[key], list) and isinstance(val, list):
-                # For lists, extend them
-                final_base[key] = final_base[key].copy()  # Avoid modifying original
-                final_base[key].extend(val)
-            elif isinstance(final_base[key], str) and isinstance(val, str):
-                # For strings, concatenate them
-                final_base[key] = final_base[key] + val
-            else:
-                # For different types, override
-                final_base[key] = val
-        elif key in inherit_keys:
-            # Inherit logic: only set if not already present in override
-            if key not in final_base:
-                final_base[key] = val
-            else:
+            if isinstance(override_spec[key], dict) and isinstance(
+                final_base[key], dict
+            ):
+                # For dictionaries, merge final_base with override_spec
+                merged_dict = final_base[key].copy()
+                merged_dict.update(override_spec[key])
+                override_spec[key] = merged_dict
 
-                warning(
-                    "Key '%s' is present in both base and override spec. Using value from override spec. Remove field to keep base value.",
-                    key,
-                )
-        else:
-            # Default behavior: override
-            final_base[key] = val
+            elif isinstance(override_spec[key], list) and isinstance(
+                final_base[key], list
+            ):
+                # For lists, combine final_base + override_spec (avoiding duplicates)
+                merged_list = final_base[key].copy()
+                for item in override_spec[key]:
+                    if item not in merged_list:
+                        merged_list.append(item)
+                override_spec[key] = merged_list
+
+            elif isinstance(override_spec[key], str) and isinstance(
+                final_base[key], str
+            ):
+                # For strings, concatenate final_base + override_spec
+                override_spec[key] = final_base[key] + override_spec[key]
+
+    # Process inherit_keys (might need to add keys from final_base)
 
     for key in inherit_keys:
-        if key in final_base and key not in override_spec:
-            pass
+        if key not in final_base:
+            raise ValueError(f"Key '{key}' is not present in final_base")
 
-    return final_base
+        if key in override_spec:
+            warning(
+                "Key '%s' is present in both override_spec and final_base. Using value from override_spec.",
+                key,
+            )
+            # Keep existing override_spec value, do nothing
+        else:
+            # Key not in override_spec, inherit from final_base
+            if isinstance(final_base[key], dict):
+                override_spec[key] = final_base[key].copy()
+            elif isinstance(final_base[key], list):
+                override_spec[key] = final_base[key].copy()
+            elif isinstance(final_base[key], str):
+                override_spec[key] = final_base[key]
+            else:
+                # For other types (int, float, bool, etc.)
+                override_spec[key] = final_base[key]
+    return override_spec
 
 
 def getInheritedRecipe(file_path, visited=None):
     if visited is None:
         visited = set()
-    
+
     if file_path in visited:
         return (f"Circular dependency detected involving {file_path}", None, None)
-    
+
     visited.add(file_path)
-    
+
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path, "r") as f:
             content = f.read()
     except IOError as e:
         debug("getInheritedRecipe: failed to read %s: %s", file_path, e)
         return (str(e), None, None)
-    
+
     try:
-        header_text, recipe_body = content.split('---', 1)
+        header_text, recipe_body = content.split("---", 1)
     except ValueError:
         return ("Unable to parse %s. Header missing." % file_path, None, None)
-    
+
     try:
         header_spec = yamlLoad(header_text)
     except Exception as e:
         debug("getInheritedRecipe: YAML parsing error for %s: %s", file_path, e)
         return (str(e), None, None)
-    
+
     debug("&&&getInheritedRecipe: file_path=%s, header_spec=%s", file_path, header_spec)
     return (None, recipe_body, header_spec, visited)
 
@@ -572,19 +689,31 @@ def resolveRecipeInheritance(file, visited=None):
     err, recipe_body, header_spec, updated_visited = getInheritedRecipe(file, visited)
     if err:
         return (err, None)
-    
+
     if header_spec and isinstance(header_spec, dict) and "inherits_body" in header_spec:
         inherit_list = header_spec.get("inherits_body") or []
         if inherit_list:
             if recipe_body and recipe_body.strip():
-                warning("Recipe in %s is not empty and will be ignored due to inheritance from %s in %s", 
-                       header_spec.get("package"), header_spec.get("package"), inherit_list[0])
-            
+                warning(
+                    "Recipe in %s is not empty and will be ignored due to inheritance from %s in %s",
+                    header_spec.get("package"),
+                    header_spec.get("package"),
+                    inherit_list[0],
+                )
+
             inherit_repo = inherit_list[0]
-            inherit_file = os.path.join(os.environ.get("BITS_REPO_DIR", ""), inherit_repo, header_spec['package'] + '.sh')
-            debug("resolveRecipeInheritance: delegating to %s (package=%s)", inherit_file, header_spec.get("package"))
+            inherit_file = os.path.join(
+                os.environ.get("BITS_REPO_DIR", ""),
+                inherit_repo,
+                header_spec["package"] + ".sh",
+            )
+            debug(
+                "resolveRecipeInheritance: delegating to %s (package=%s)",
+                inherit_file,
+                header_spec.get("package"),
+            )
             return resolveRecipeInheritance(inherit_file, updated_visited)
-    
+
     return (None, recipe_body)
 
 
@@ -596,7 +725,7 @@ def parseRecipe(reader):
 
     try:
         raw = reader()
-        header_text, recipe = raw.split('---', 1)
+        header_text, recipe = raw.split("---", 1)
         spec = yamlLoad(header_text)
         validateSpec(spec)
     except RuntimeError as e:
@@ -605,349 +734,443 @@ def parseRecipe(reader):
         err = str(e)
     except SpecError as e:
         # Reader objects may not always expose a .url attribute; guard accordingly
-        reader_url = getattr(reader, 'url', '<unknown>')
+        reader_url = getattr(reader, "url", "<unknown>")
         err = "Malformed header for %s\n%s" % (reader_url, str(e))
     except (yaml.scanner.ScannerError, yaml.parser.ParserError) as e:
-        reader_url = getattr(reader, 'url', '<unknown>')
+        reader_url = getattr(reader, "url", "<unknown>")
         err = "Unable to parse %s\n%s" % (reader_url, str(e))
     except ValueError:
-        reader_url = getattr(reader, 'url', '<unknown>')
+        reader_url = getattr(reader, "url", "<unknown>")
         err = "Unable to parse %s. Header missing." % reader_url
 
     # If parsing the header failed, return the error immediately
     if err:
         return (err, spec, recipe)
-    
+
     # Handle 'from' inheritance that merges headers (metadata)
-    if spec and 'from' in spec:
+    if spec and "from" in spec:
         mergePolicy = spec.pop("merge_policy")
-        spec = mergeHeader(spec, os.path.join(os.environ.get('BITS_REPO_DIR', ''), spec['from'][0], spec['package'] + '.sh'), mergePolicy)
-        debug("&&&parseRecipe: inh_spec is %s", spec)
+        spec = mergeHeader(
+            spec,
+            os.path.join(
+                os.environ.get("BITS_REPO_DIR", ""),
+                spec["from"][0],
+                spec["package"] + ".sh",
+            ),
+            mergePolicy,
+        )
+        debug("&&&mergedRecipe: merged_spec is")
+        pprint.pprint(spec)
 
     # Handle 'inherits_body' semantics: fetch/return the inherited recipe body
-    if spec and 'inherits_body' in spec:
-        inherit_repo = spec['inherits_body'][0]
-        inherit_file = os.path.join(os.environ.get('BITS_REPO_DIR', ''), inherit_repo, spec['package'] + '.sh')
-        inherited_err, recipe = resolveRecipeInheritance(inherit_file)
+    if spec and "inherits_body" in spec:
+        inherited_err, recipe = resolveRecipeInheritance(
+            os.path.join(
+                os.environ.get("BITS_REPO_DIR", ""),
+                spec["inherits_body"][0],
+                spec["package"] + ".sh",
+            )
+        )
         if inherited_err:
             dieOnError("Error while resolving inheritance: %s", inherited_err)
-        
+
     return (err, spec, recipe)
 
 
 # (Almost pure part of the defaults parsing)
 # Override defaultsGetter for unit tests.
 def parseDefaults(disable, defaultsGetter, log):
-  defaultsMeta, defaultsBody = defaultsGetter()
-  # Defaults are actually special packages. They can override metadata
-  # of any other package and they can disable other packages. For
-  # example they could decide to switch from ROOT 5 to ROOT 6 and they
-  # could disable alien for O2. For this reason we need to parse their
-  # metadata early and extract the override and disable data.
-  defaultsDisable = asList(defaultsMeta.get("disable", []))
-  for x in defaultsDisable:
-    log("Package %s has been disabled by current default.", x)
-  disable.extend(defaultsDisable)
-  if type(defaultsMeta.get("overrides", OrderedDict())) != OrderedDict:
-    return ("overrides should be a dictionary", None, None, None)
-  overrides, taps = OrderedDict(), {}
-  package_env = OrderedDict()
-  commonEnv = {"env": defaultsMeta["env"]} if "env" in defaultsMeta else {}
-  overrides["defaults-release"] = commonEnv
-  for k, v in defaultsMeta.get("overrides", {}).items():
-    f = k.split("@", 1)[0].lower()
-    if "@" in k:
-      taps[f] = "dist:"+k
-    overrides[f] = dict(**(v or {}))
-  package_env_map = defaultsMeta.get("package_env") or {}
-  if not isinstance(package_env_map, dict):
-    return("'package_env' should be a dictionary %s", type(package_env_map))
-  else:
-    global_env_keys = set(defaultsMeta.get("env", {}).keys())
-    for k, v in package_env_map.items():
-      f = k.split("@", 1)[0].lower()
-      if f in package_env:
-        return (f"Duplicate Env '{f}' found in package_env", None, None, None)
-      if isinstance(v, dict):
-        conflicting_keys = global_env_keys.intersection(v.keys())
-      if conflicting_keys:
-        return (f"Environment variables {list(conflicting_keys)} redeclared in package_env for '{f}'", None, None, None)
-      package_env[f] = OrderedDict(v) if isinstance(v, dict) else v
-      overrides.setdefault(f, OrderedDict())
-      overrides[f]["package_env"] = v
-  return (None, overrides, taps, package_env)
+    defaultsMeta, defaultsBody = defaultsGetter()
+    # Defaults are actually special packages. They can override metadata
+    # of any other package and they can disable other packages. For
+    # example they could decide to switch from ROOT 5 to ROOT 6 and they
+    # could disable alien for O2. For this reason we need to parse their
+    # metadata early and extract the override and disable data.
+    defaultsDisable = asList(defaultsMeta.get("disable", []))
+    for x in defaultsDisable:
+        log("Package %s has been disabled by current default.", x)
+    disable.extend(defaultsDisable)
+    if type(defaultsMeta.get("overrides", OrderedDict())) != OrderedDict:
+        return ("overrides should be a dictionary", None, None, None)
+    overrides, taps = OrderedDict(), {}
+    package_env = OrderedDict()
+    commonEnv = {"env": defaultsMeta["env"]} if "env" in defaultsMeta else {}
+    overrides["defaults-release"] = commonEnv
+    for k, v in defaultsMeta.get("overrides", {}).items():
+        f = k.split("@", 1)[0].lower()
+        if "@" in k:
+            taps[f] = "dist:" + k
+        overrides[f] = dict(**(v or {}))
+    package_env_map = defaultsMeta.get("package_env") or {}
+    if not isinstance(package_env_map, dict):
+        return ("'package_env' should be a dictionary %s", type(package_env_map))
+    else:
+        global_env_keys = set(defaultsMeta.get("env", {}).keys())
+        for k, v in package_env_map.items():
+            f = k.split("@", 1)[0].lower()
+            if f in package_env:
+                return (f"Duplicate Env '{f}' found in package_env", None, None, None)
+            if isinstance(v, dict):
+                conflicting_keys = global_env_keys.intersection(v.keys())
+            if conflicting_keys:
+                return (
+                    f"Environment variables {list(conflicting_keys)} redeclared in package_env for '{f}'",
+                    None,
+                    None,
+                    None,
+                )
+            package_env[f] = OrderedDict(v) if isinstance(v, dict) else v
+            overrides.setdefault(f, OrderedDict())
+            overrides[f]["package_env"] = v
+    return (None, overrides, taps, package_env)
+
 
 def checkForFilename(taps, pkg, d):
-  filename = taps.get(pkg, "%s/%s.sh" % (d, pkg))
-  if not exists(filename):
-    if "/" in pkg:
-      filename = taps.get(pkg, "%s/%s" % (d, pkg))
-    else:
-      filename = taps.get(pkg, "%s/%s/latest" % (d, pkg))
-  return filename
+    filename = taps.get(pkg, "%s/%s.sh" % (d, pkg))
+    if not exists(filename):
+        if "/" in pkg:
+            filename = taps.get(pkg, "%s/%s" % (d, pkg))
+        else:
+            filename = taps.get(pkg, "%s/%s/latest" % (d, pkg))
+    return filename
+
 
 def getConfigPaths(configDir):
-  configPath = os.environ.get("BITS_PATH")
-  pkgDirs = [configDir]
-  if configPath:
-    for d in [join(configDir, "%s.bits" % r) for r in configPath.split(",") if r]:
-       if exists(d):
-         pkgDirs.append(d)
-  return pkgDirs
+    configPath = os.environ.get("BITS_PATH")
+    pkgDirs = [configDir]
+    if configPath:
+        for d in [join(configDir, "%s.bits" % r) for r in configPath.split(",") if r]:
+            if exists(d):
+                pkgDirs.append(d)
+    return pkgDirs
+
 
 def resolveFilename(taps, pkg, configDir, genPackages):
-  if pkg in genPackages:
-    return ("generate:%s@%s" % (pkg, genPackages[pkg]["version"]), genPackages[pkg]["pkgdir"])
+    if pkg in genPackages:
+        return (
+            "generate:%s@%s" % (pkg, genPackages[pkg]["version"]),
+            genPackages[pkg]["pkgdir"],
+        )
 
-  for d in getConfigPaths(configDir):
-    filename = checkForFilename(taps,pkg,d)
-    if exists(filename):
-      return(filename,os.path.abspath(d))
+    for d in getConfigPaths(configDir):
+        filename = checkForFilename(taps, pkg, d)
+        if exists(filename):
+            return (filename, os.path.abspath(d))
 
-  dieOnError(True, "Package %s not found in %s" % (pkg, configDir))
+    dieOnError(True, "Package %s not found in %s" % (pkg, configDir))
+
 
 def resolveDefaultsFilename(defaults, configDir):
-  configPath = os.environ.get("BITS_PATH")
-  cfgDir = configDir
-  pkgDirs = [cfgDir]
+    configPath = os.environ.get("BITS_PATH")
+    cfgDir = configDir
+    pkgDirs = [cfgDir]
 
-  if configPath:
-    for d in configPath.split(","):
-       pkgDirs.append(cfgDir + "/" + d + ".bits")
+    if configPath:
+        for d in configPath.split(","):
+            pkgDirs.append(cfgDir + "/" + d + ".bits")
 
-  for d in pkgDirs:
-    filename = "%s/defaults-%s.sh" % (d, defaults)
-    if exists(filename):
-      return(filename)
+    for d in pkgDirs:
+        filename = "%s/defaults-%s.sh" % (d, defaults)
+        if exists(filename):
+            return filename
 
-  error("Default `%s' does not exists.\n" % (filename or "<no defaults specified>"))
+    error("Default `%s' does not exists.\n" % (filename or "<no defaults specified>"))
 
-  '''
+    """
   error("Default `%s' does not exists. Viable options:\n%s" %
           (defaults or "<no defaults specified>",
            "\n".join("- " + basename(x).replace("defaults-", "").replace(".sh", "")
                      for x in glob(join(configDir, "defaults-*.sh")))))
-  '''
+  """
 
-def getPackageList(packages, specs, configDir, preferSystem, noSystem,
-                   architecture, disable, defaults, performPreferCheck, performRequirementCheck,
-                   performValidateDefaults, overrides, taps, log, force_rebuild=()):
-  systemPackages = set()
-  ownPackages = set()
-  failedRequirements = set()
-  testCache = {}
-  requirementsCache = {}
-  trackingEnvCache = {}
-  packages = packages[:]
-  generatedPackages = getGeneratedPackages(configDir)
-  validDefaults = []  # empty list: all OK; None: no valid default; non-empty list: list of valid ones
 
-  while packages:
-    p = packages.pop(0)
-    if p in specs or (p == "defaults-release" and ("defaults-" + defaults) in specs):
-      continue
+def getPackageList(
+    packages,
+    specs,
+    configDir,
+    preferSystem,
+    noSystem,
+    architecture,
+    disable,
+    defaults,
+    performPreferCheck,
+    performRequirementCheck,
+    performValidateDefaults,
+    overrides,
+    taps,
+    log,
+    force_rebuild=(),
+):
+    systemPackages = set()
+    ownPackages = set()
+    failedRequirements = set()
+    testCache = {}
+    requirementsCache = {}
+    trackingEnvCache = {}
+    packages = packages[:]
+    generatedPackages = getGeneratedPackages(configDir)
+    validDefaults = (
+        []
+    )  # empty list: all OK; None: no valid default; non-empty list: list of valid ones
 
-    # We rewrite all defaults to "defaults-release", so load the correct
-    # defaults package here.
-    # The reason for this rewriting is (I assume) so that packages that are
-    # not overridden by some defaults can be shared with other defaults, since
-    # they will end up with the same hash. The defaults must be called
-    # "defaults-release" for this to work, since the defaults are a dependency
-    # and all dependencies' names go into a package's hash.
-    pkg_filename = ("defaults-" + defaults) if p == "defaults-release" else p.lower()
+    while packages:
+        p = packages.pop(0)
+        if p in specs or (
+            p == "defaults-release" and ("defaults-" + defaults) in specs
+        ):
+            continue
 
-    filename,pkgdir = resolveFilename(taps, pkg_filename, configDir, generatedPackages)
+        # We rewrite all defaults to "defaults-release", so load the correct
+        # defaults package here.
+        # The reason for this rewriting is (I assume) so that packages that are
+        # not overridden by some defaults can be shared with other defaults, since
+        # they will end up with the same hash. The defaults must be called
+        # "defaults-release" for this to work, since the defaults are a dependency
+        # and all dependencies' names go into a package's hash.
+        pkg_filename = (
+            ("defaults-" + defaults) if p == "defaults-release" else p.lower()
+        )
 
-    dieOnError(not filename, "Package %s not found in %s" % (p, configDir))
-    assert(filename is not None)
+        filename, pkgdir = resolveFilename(
+            taps, pkg_filename, configDir, generatedPackages
+        )
 
-    err, spec, recipe = parseRecipe(getRecipeReader(filename, configDir, generatedPackages))
-    dieOnError(err, err)
-    # Unless there was an error, both spec and recipe should be valid.
-    # otherwise the error should have been caught above.
-    assert(spec is not None)
-    assert(recipe is not None)
-    dieOnError(spec["package"].lower() != pkg_filename,
-               "%s.sh has different package field: %s" % (p, spec["package"]))
-    spec["pkgdir"] = pkgdir
+        dieOnError(not filename, "Package %s not found in %s" % (p, configDir))
+        assert filename is not None
 
-    if p == "defaults-release":
-      # Re-rewrite the defaults' name to "defaults-release". Everything auto-
-      # depends on "defaults-release", so we need something with that name.
-      spec["package"] = "defaults-release"
+        err, spec, recipe = parseRecipe(
+            getRecipeReader(filename, configDir, generatedPackages)
+        )
+        dieOnError(err, err)
+        # Unless there was an error, both spec and recipe should be valid.
+        # otherwise the error should have been caught above.
+        assert spec is not None
+        assert recipe is not None
+        dieOnError(
+            spec["package"].lower() != pkg_filename,
+            "%s.sh has different package field: %s" % (p, spec["package"]),
+        )
+        spec["pkgdir"] = pkgdir
 
-      # Never run the defaults' recipe, to match previous behaviour.
-      # Warn if a non-trivial recipe is found (i.e., one with any non-comment lines).
-      for line in map(str.strip, recipe.splitlines()):
-        if line and not line.startswith("#"):
-          warning("%s.sh contains a recipe, which will be ignored", pkg_filename)
-      recipe = ""
+        if p == "defaults-release":
+            # Re-rewrite the defaults' name to "defaults-release". Everything auto-
+            # depends on "defaults-release", so we need something with that name.
+            spec["package"] = "defaults-release"
 
-    dieOnError(spec["package"] != p,
-               "%s should be spelt %s." % (p, spec["package"]))
+            # Never run the defaults' recipe, to match previous behaviour.
+            # Warn if a non-trivial recipe is found (i.e., one with any non-comment lines).
+            for line in map(str.strip, recipe.splitlines()):
+                if line and not line.startswith("#"):
+                    warning(
+                        "%s.sh contains a recipe, which will be ignored", pkg_filename
+                    )
+            recipe = ""
 
-    # If an override fully matches a package, we apply it. This means
-    # you can have multiple overrides being applied for a given package.
-    for override in overrides:
-      # We downcase the regex in parseDefaults(), so downcase the package name
-      # as well. FIXME: This is probably a bad idea; we should use
-      # re.IGNORECASE instead or just match case-sensitively.
-      if not re.fullmatch(override, p.lower()):
-        continue
-      log("Overrides for package %s: %s", spec["package"], overrides[override])
-      spec.update(overrides.get(override, {}) or {})
+        dieOnError(
+            spec["package"] != p, "%s should be spelt %s." % (p, spec["package"])
+        )
 
-    # If --always-prefer-system is passed or if prefer_system is set to true
-    # inside the recipe, use the script specified in the prefer_system_check
-    # stanza to see if we can use the system version of the package.
-    systemRE = spec.get("prefer_system", "(?!.*)")
-    try:
-      systemREMatches = re.match(systemRE, architecture)
-    except TypeError:
-      dieOnError(True, "Malformed entry prefer_system: %s in %s" % (systemRE, spec["package"]))
+        # If an override fully matches a package, we apply it. This means
+        # you can have multiple overrides being applied for a given package.
+        for override in overrides:
+            # We downcase the regex in parseDefaults(), so downcase the package name
+            # as well. FIXME: This is probably a bad idea; we should use
+            # re.IGNORECASE instead or just match case-sensitively.
+            if not re.fullmatch(override, p.lower()):
+                continue
+            log("Overrides for package %s: %s", spec["package"], overrides[override])
+            spec.update(overrides.get(override, {}) or {})
 
-    noSystemList = []
-    if noSystem == "*":
-      noSystemList = [spec["package"]]
-    elif noSystem is not None:
-      noSystemList = noSystem.split(",")
-    systemExcluded = (spec["package"] in noSystemList)
-    allowSystemPackageUpload = spec.get("allow_system_package_upload", False)
-    # Fill the track env with the actual result from executing the script.
-    for env, trackingCode in spec.get("track_env", {}).items():
-      key = spec["package"] + env
-      if key not in trackingEnvCache:
-        status, out = performPreferCheck(spec, trackingCode)
-        dieOnError(status, "Error while executing track_env for {}: {} => {}".format(key, trackingCode, out))
-        trackingEnvCache[key] = out
-      spec["track_env"][env] = trackingEnvCache[key]
+        # If --always-prefer-system is passed or if prefer_system is set to true
+        # inside the recipe, use the script specified in the prefer_system_check
+        # stanza to see if we can use the system version of the package.
+        systemRE = spec.get("prefer_system", "(?!.*)")
+        try:
+            systemREMatches = re.match(systemRE, architecture)
+        except TypeError:
+            dieOnError(
+                True,
+                "Malformed entry prefer_system: %s in %s" % (systemRE, spec["package"]),
+            )
 
-    if (not systemExcluded or allowSystemPackageUpload) and  (preferSystem or systemREMatches):
-      requested_version = resolve_version(spec, defaults, "unavailable", "unavailable")
-      cmd = "REQUESTED_VERSION={version}\n{check}".format(
-        version=quote(requested_version),
-        check=spec.get("prefer_system_check", "false"),
-      ).strip()
-      if spec["package"] not in testCache:
-        testCache[spec["package"]] = performPreferCheck(spec, cmd)
-      err, output = testCache[spec["package"]]
-      if err:
-        # prefer_system_check errored; this means we must build the package ourselves.
-        ownPackages.add(spec["package"])
-      else:
-        # prefer_system_check succeeded; this means we should use the system package.
-        match = re.search(r"^bits_system_replace:(?P<key>.*)$", output, re.MULTILINE)
-        if not match and systemExcluded:
-          # No replacement spec name given. Fall back to old system package
-          # behaviour and just disable the package.
-          ownPackages.add(spec["package"])
-        elif not match and not systemExcluded:
-          # No replacement spec name given. Fall back to old system package
-          # behaviour and just disable the package.
-          systemPackages.add(spec["package"])
-          disable.append(spec["package"])
-        elif match:
-          # The check printed the name of a replacement; use it.
-          key = match.group("key").strip()
-          replacement = None
-          for replacement_matcher in spec["prefer_system_replacement_specs"]:
-            if re.match(replacement_matcher, key):
-              replacement = spec["prefer_system_replacement_specs"][replacement_matcher]
-              break
-          if replacement:
-            # We must keep the package name the same, since it is used to
-            # specify dependencies.
-            replacement["package"] = spec["package"]
-            # The version is required for all specs. What we put there will
-            # influence the package's hash, so allow the user to override it.
-            replacement.setdefault("version", requested_version)
-            spec = replacement
-            # Allows generalising the version based on the actual key provided
-            spec["version"] = spec["version"].replace("%(key)s", key)
-            recipe = replacement.get("recipe", "")
-            # If there's an explicitly-specified recipe, we're still building
-            # the package. If not, aliBuild will still "build" it, but it's
-            # basically instantaneous, so report to the user that we're taking
-            # it from the system.
-            if recipe:
-              ownPackages.add(spec["package"])
+        noSystemList = []
+        if noSystem == "*":
+            noSystemList = [spec["package"]]
+        elif noSystem is not None:
+            noSystemList = noSystem.split(",")
+        systemExcluded = spec["package"] in noSystemList
+        allowSystemPackageUpload = spec.get("allow_system_package_upload", False)
+        # Fill the track env with the actual result from executing the script.
+        for env, trackingCode in spec.get("track_env", {}).items():
+            key = spec["package"] + env
+            if key not in trackingEnvCache:
+                status, out = performPreferCheck(spec, trackingCode)
+                dieOnError(
+                    status,
+                    "Error while executing track_env for {}: {} => {}".format(
+                        key, trackingCode, out
+                    ),
+                )
+                trackingEnvCache[key] = out
+            spec["track_env"][env] = trackingEnvCache[key]
+
+        if (not systemExcluded or allowSystemPackageUpload) and (
+            preferSystem or systemREMatches
+        ):
+            requested_version = resolve_version(
+                spec, defaults, "unavailable", "unavailable"
+            )
+            cmd = "REQUESTED_VERSION={version}\n{check}".format(
+                version=quote(requested_version),
+                check=spec.get("prefer_system_check", "false"),
+            ).strip()
+            if spec["package"] not in testCache:
+                testCache[spec["package"]] = performPreferCheck(spec, cmd)
+            err, output = testCache[spec["package"]]
+            if err:
+                # prefer_system_check errored; this means we must build the package ourselves.
+                ownPackages.add(spec["package"])
             else:
-              systemPackages.add(spec["package"])
-          else:
-            warning(f"Could not find named replacement spec for {spec['package']}: {key}, "
-                    "falling back to building the package ourselves.")
+                # prefer_system_check succeeded; this means we should use the system package.
+                match = re.search(
+                    r"^bits_system_replace:(?P<key>.*)$", output, re.MULTILINE
+                )
+                if not match and systemExcluded:
+                    # No replacement spec name given. Fall back to old system package
+                    # behaviour and just disable the package.
+                    ownPackages.add(spec["package"])
+                elif not match and not systemExcluded:
+                    # No replacement spec name given. Fall back to old system package
+                    # behaviour and just disable the package.
+                    systemPackages.add(spec["package"])
+                    disable.append(spec["package"])
+                elif match:
+                    # The check printed the name of a replacement; use it.
+                    key = match.group("key").strip()
+                    replacement = None
+                    for replacement_matcher in spec["prefer_system_replacement_specs"]:
+                        if re.match(replacement_matcher, key):
+                            replacement = spec["prefer_system_replacement_specs"][
+                                replacement_matcher
+                            ]
+                            break
+                    if replacement:
+                        # We must keep the package name the same, since it is used to
+                        # specify dependencies.
+                        replacement["package"] = spec["package"]
+                        # The version is required for all specs. What we put there will
+                        # influence the package's hash, so allow the user to override it.
+                        replacement.setdefault("version", requested_version)
+                        spec = replacement
+                        # Allows generalising the version based on the actual key provided
+                        spec["version"] = spec["version"].replace("%(key)s", key)
+                        recipe = replacement.get("recipe", "")
+                        # If there's an explicitly-specified recipe, we're still building
+                        # the package. If not, aliBuild will still "build" it, but it's
+                        # basically instantaneous, so report to the user that we're taking
+                        # it from the system.
+                        if recipe:
+                            ownPackages.add(spec["package"])
+                        else:
+                            systemPackages.add(spec["package"])
+                    else:
+                        warning(
+                            f"Could not find named replacement spec for {spec['package']}: {key}, "
+                            "falling back to building the package ourselves."
+                        )
 
-    dieOnError(("system_requirement" in spec) and recipe.strip("\n\t "),
-               "System requirements %s cannot have a recipe" % spec["package"])
-    if re.match(spec.get("system_requirement", "(?!.*)"), architecture):
-      cmd = spec.get("system_requirement_check", "false")
-      if spec["package"] not in requirementsCache:
-        requirementsCache[spec["package"]] = performRequirementCheck(spec, cmd.strip())
+        dieOnError(
+            ("system_requirement" in spec) and recipe.strip("\n\t "),
+            "System requirements %s cannot have a recipe" % spec["package"],
+        )
+        if re.match(spec.get("system_requirement", "(?!.*)"), architecture):
+            cmd = spec.get("system_requirement_check", "false")
+            if spec["package"] not in requirementsCache:
+                requirementsCache[spec["package"]] = performRequirementCheck(
+                    spec, cmd.strip()
+                )
 
-      err, output = requirementsCache[spec["package"]]
-      if err:
-        failedRequirements.update([spec["package"]])
-        spec["version"] = "failed"
-      else:
-        disable.append(spec["package"])
+            err, output = requirementsCache[spec["package"]]
+            if err:
+                failedRequirements.update([spec["package"]])
+                spec["version"] = "failed"
+            else:
+                disable.append(spec["package"])
 
-    spec["disabled"] = list(disable)
-    if spec["package"] in disable:
-      continue
+        spec["disabled"] = list(disable)
+        if spec["package"] in disable:
+            continue
 
-    # Check whether the package is compatible with the specified defaults
-    if validDefaults is not None:
-      (ok,msg,valid) = performValidateDefaults(spec)
-      if valid:
-        validDefaults = [ v for v in validDefaults if v in valid ] if validDefaults else valid[:]
-        if not validDefaults:
-          validDefaults = None  # no valid default works for all current packages
+        # Check whether the package is compatible with the specified defaults
+        if validDefaults is not None:
+            (ok, msg, valid) = performValidateDefaults(spec)
+            if valid:
+                validDefaults = (
+                    [v for v in validDefaults if v in valid]
+                    if validDefaults
+                    else valid[:]
+                )
+                if not validDefaults:
+                    validDefaults = (
+                        None  # no valid default works for all current packages
+                    )
 
-    # For the moment we treat build_requires just as requires.
-    fn = lambda what: disabledByArchitectureDefaults(architecture, defaults, spec.get(what, []))
-    spec["disabled"] += [x for x in fn("requires")]
-    spec["disabled"] += [x for x in fn("build_requires")]
-    fn = lambda what: filterByArchitectureDefaults(architecture, defaults, spec.get(what, []))
-    spec["requires"] = [x for x in fn("requires") if x not in disable]
-    spec["build_requires"] = [x for x in fn("build_requires") if x not in disable]
-    if spec["package"] != "defaults-release":
-      spec["build_requires"].append("defaults-release")
-    spec["runtime_requires"] = spec["requires"]
-    spec["requires"] = spec["runtime_requires"] + spec["build_requires"]
-    # Check that version is a string
-    dieOnError(not isinstance(spec["version"], str),
-               "In recipe \"%s\": version must be a string" % p)
-    spec["tag"] = spec.get("tag", spec["version"])
-    spec["version"] = spec["version"].replace("/", "_")
-    spec["recipe"] = recipe.strip("\n")
-    if spec["package"] in force_rebuild:
-      spec["force_rebuild"] = True
-    specs[spec["package"]] = spec
-    packages += spec["requires"]
-  return (systemPackages, ownPackages, failedRequirements, validDefaults)
+        # For the moment we treat build_requires just as requires.
+        fn = lambda what: disabledByArchitectureDefaults(
+            architecture, defaults, spec.get(what, [])
+        )
+        spec["disabled"] += [x for x in fn("requires")]
+        spec["disabled"] += [x for x in fn("build_requires")]
+        fn = lambda what: filterByArchitectureDefaults(
+            architecture, defaults, spec.get(what, [])
+        )
+        spec["requires"] = [x for x in fn("requires") if x not in disable]
+        spec["build_requires"] = [x for x in fn("build_requires") if x not in disable]
+        if spec["package"] != "defaults-release":
+            spec["build_requires"].append("defaults-release")
+        spec["runtime_requires"] = spec["requires"]
+        spec["requires"] = spec["runtime_requires"] + spec["build_requires"]
+        # Check that version is a string
+        dieOnError(
+            not isinstance(spec["version"], str),
+            'In recipe "%s": version must be a string' % p,
+        )
+        spec["tag"] = spec.get("tag", spec["version"])
+        spec["version"] = spec["version"].replace("/", "_")
+        spec["recipe"] = recipe.strip("\n")
+        if spec["package"] in force_rebuild:
+            spec["force_rebuild"] = True
+        specs[spec["package"]] = spec
+        packages += spec["requires"]
+    return (systemPackages, ownPackages, failedRequirements, validDefaults)
+
 
 def getGeneratedPackages(configDir):
-  pkgs = {}
-  pkgDirs = getConfigPaths(configDir)
-  for pkgdir in pkgDirs:
-    for vp in [x.split(os.sep)[-2] for x in  glob(join(pkgdir,"*","packages.py"))]:
-      sys.path.insert(0,join(pkgdir, vp))
-      pkg = __import__("packages")
-      pkg.getPackages(pkgs, pkgdir)
-      sys.modules.pop('packages')
-      x=sys.path.pop(0)
-  return pkgs
+    pkgs = {}
+    pkgDirs = getConfigPaths(configDir)
+    for pkgdir in pkgDirs:
+        for vp in [x.split(os.sep)[-2] for x in glob(join(pkgdir, "*", "packages.py"))]:
+            sys.path.insert(0, join(pkgdir, vp))
+            pkg = __import__("packages")
+            pkg.getPackages(pkgs, pkgdir)
+            sys.modules.pop("packages")
+            x = sys.path.pop(0)
+    return pkgs
+
 
 class Hasher:
-  def __init__(self) -> None:
-    self.h = hashlib.sha1()
-  def __call__(self, txt):
-    if not type(txt) == bytes:
-      txt = txt.encode('utf-8', 'ignore')
-    self.h.update(txt)
-  def hexdigest(self):
-    return self.h.hexdigest()
-  def copy(self):
-    new_hasher = Hasher()
-    new_hasher.h = self.h.copy()
-    return new_hasher
+    def __init__(self) -> None:
+        self.h = hashlib.sha1()
+
+    def __call__(self, txt):
+        if not type(txt) == bytes:
+            txt = txt.encode("utf-8", "ignore")
+        self.h.update(txt)
+
+    def hexdigest(self):
+        return self.h.hexdigest()
+
+    def copy(self):
+        new_hasher = Hasher()
+        new_hasher.h = self.h.copy()
+        return new_hasher
