@@ -658,6 +658,7 @@ def getInheritedRecipe(file_path, visited=None):
     if visited is None:
         visited = set()
 
+    # If we've seen this path already, report a circular dependency but still return 4 values
     if file_path in visited:
         return (f"Circular dependency detected involving {file_path}", None, None, visited)
 
@@ -699,8 +700,6 @@ def resolveRecipeInheritance(file, visited=None):
                     header_spec.get("package"),
                     header_spec["inherits_body"],
                 )
-
-            inherit_repo = inherit_list[0]
             inherit_file = os.path.join(
                 os.environ.get("BITS_REPO_DIR", ""),
                 header_spec["inherits_body"],
@@ -753,7 +752,7 @@ def parseRecipe(reader):
             spec,
             os.path.join(
                 os.environ.get("BITS_REPO_DIR", ""),
-                spec["from"][0],
+                spec["from"],
                 spec["package"] + ".sh",
             ),
             mergePolicy,
@@ -763,6 +762,8 @@ def parseRecipe(reader):
 
     # Handle 'inherits_body' semantics: fetch/return the inherited recipe body
     if spec and "inherits_body" in spec:
+        spec_path =os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["inherits_body"],spec["package"] + ".sh",)
+        debug("&&&spech_path is %s", spec_path)
         inherited_err, recipe = resolveRecipeInheritance(
             os.path.join(
                 os.environ.get("BITS_REPO_DIR", ""),
