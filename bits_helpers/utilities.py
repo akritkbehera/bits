@@ -571,8 +571,7 @@ def mergeHeader(override_spec, path_to_base_spec, mergePolicy=None, visited=None
 
 
 def handleMergePolicy(override_spec, final_base, mergePolicy):
-    debug("override_spec is %s", override_spec)
-    debug("final_base is %s", final_base)
+
     inherit_keys = mergePolicy.get("inherit", [])
     if inherit_keys is None:
         inherit_keys = []
@@ -589,11 +588,12 @@ def handleMergePolicy(override_spec, final_base, mergePolicy):
         or "version" in append_keys
         or "tag" in append_keys
         or "source" in append_keys
+        or "from" in append_keys    
     ):
         raise ValueError("Cannot append single value fields")
 
     debug(
-        "&&&mergeHeader: inherit_keys is %s, append_keys is %s",
+        "&&&mergeHeader: inherit_keys are %s, append_keys are %s",
         inherit_keys,
         append_keys,
     )
@@ -601,56 +601,24 @@ def handleMergePolicy(override_spec, final_base, mergePolicy):
     for k, v in override_spec.items():
         print(f"{k}: {type(v).__name__}")
 
-    for key, val in override_spec.items():
-        if key in append_keys and key in final_base:
-            # Append logic based on data type
-            if isinstance(override_spec[key], dict) and isinstance(
-                final_base[key], dict
-            ):
-                # For dictionaries, merge final_base with override_spec
-                merged_dict = final_base[key].copy()
-                merged_dict.update(override_spec[key])
-                override_spec[key] = merged_dict
-
-            elif isinstance(override_spec[key], list) and isinstance(
-                final_base[key], list
-            ):
-                # For lists, combine final_base + override_spec (avoiding duplicates)
-                merged_list = final_base[key].copy()
-                for item in override_spec[key]:
-                    if item not in merged_list:
-                        merged_list.append(item)
-                override_spec[key] = merged_list
-
-            elif isinstance(override_spec[key], str) and isinstance(
-                final_base[key], str
-            ):
-                # For strings, concatenate final_base + override_spec
-                override_spec[key] = final_base[key] + override_spec[key]
-
-    # Process inherit_keys (might need to add keys from final_base)
-
     for key in inherit_keys:
-        if key not in final_base:
-            raise ValueError(f"Key '{key}' is not present in final_base")
+        if key not in override_spec:
+            override_spec[key] = final_base[key]
 
-        if key in override_spec:
-            warning(
-                "Key '%s' is present in both override_spec and final_base. Using value from override_spec.",
-                key,
-            )
-            # Keep existing override_spec value, do nothing
+    for key in append_keys:
+        if key not in final_base:
+            raise warning(
+                "Key '%s' is not present in %s will continue with as mentioned with current metadata.", key, override_spec['from'])
+        if key not in override_spec:
+                override_spec[key] = final_base[key]
+                raise warning("Key '%s' is not present in recipe, inheriting from %s", key, override_spec['from'])
+        if not isinstance(override_spec[key], OrderedDict):
+            raise ValueError("Append key not allowed for %s as it's of type %s", key, type(override_spec.get(key, "unknown")))
         else:
-            # Key not in override_spec, inherit from final_base
-            if isinstance(final_base[key], dict):
-                override_spec[key] = final_base[key].copy()
-            elif isinstance(final_base[key], list):
-                override_spec[key] = final_base[key].copy()
-            elif isinstance(final_base[key], str):
-                override_spec[key] = final_base[key]
-            else:
-                # For other types (int, float, bool, etc.)
-                override_spec[key] = final_base[key]
+            if key in override_spec and key in final_base:
+                original_value = final_base[key].copy()
+                original_value.update(override_spec[key])
+                override_spec[key] = original_value
     return override_spec
 
 
