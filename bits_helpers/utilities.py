@@ -608,17 +608,22 @@ def handleMergePolicy(override_spec, final_base, mergePolicy):
     for key in append_keys:
         if key not in final_base:
             raise warning(
-                "Key '%s' is not present in %s will continue with as mentioned with current metadata.", key, override_spec['from'])
+                "Key '%s' is not present in %s will continue with as mentioned with current metadata.", key, override_spec['from']
+            )
         if key not in override_spec:
                 override_spec[key] = final_base[key]
                 raise warning("Key '%s' is not present in recipe, inheriting from %s", key, override_spec['from'])
-        if not isinstance(override_spec[key], OrderedDict):
-            raise ValueError("Append key not allowed for %s as it's of type %s", key, type(override_spec.get(key, "unknown")))
-        else:
-            if key in override_spec and key in final_base:
-                original_value = final_base[key].copy()
-                original_value.update(override_spec[key])
-                override_spec[key] = original_value
+        else: 
+            if isinstance(override_spec[key], list):
+                override_spec[key].extend(final_base[key])
+            elif isinstance(override_spec[key], OrderedDict):
+                if key in override_spec and key in final_base:
+                    original_value = final_base[key].copy()
+                    original_value.update(override_spec[key])
+                    override_spec[key] = original_value
+            else:
+                raise ValueError("Append key not allowed for %s as it's of type %s", key, type(override_spec.get(key, "unknown")))
+
     return override_spec
 
 
@@ -626,7 +631,6 @@ def getInheritedRecipe(file_path, visited=None):
     if visited is None:
         visited = set()
 
-    # If we've seen this path already, report a circular dependency but still return 4 values
     if file_path in visited:
         return (f"Circular dependency detected involving {file_path}", None, None, visited)
 
@@ -699,7 +703,6 @@ def parseRecipe(reader):
     except IOError as e:
         err = str(e)
     except SpecError as e:
-        # Reader objects may not always expose a .url attribute; guard accordingly
         reader_url = getattr(reader, "url", "<unknown>")
         err = "Malformed header for %s\n%s" % (reader_url, str(e))
     except (yaml.scanner.ScannerError, yaml.parser.ParserError) as e:
@@ -709,11 +712,9 @@ def parseRecipe(reader):
         reader_url = getattr(reader, "url", "<unknown>")
         err = "Unable to parse %s. Header missing." % reader_url
 
-    # If parsing the header failed, return the error immediately
     if err:
         return (err, spec, recipe)
-
-    # Handle 'from' inheritance that merges headers (metadata)
+    
     if spec and "from" in spec:
         mergePolicy = spec.pop("merge_policy")
         spec = mergeHeader(
@@ -725,10 +726,7 @@ def parseRecipe(reader):
             ),
             mergePolicy,
         )
-        debug("&&&mergedRecipe: merged_spec is")
-        pprint.pprint(spec)
-
-    # Handle 'inherits_body' semantics: fetch/return the inherited recipe body
+    
     if spec and "inherits_body" in spec:
         spec_path =os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["inherits_body"],spec["package"] + ".sh",)
         debug("&&&spech_path is %s", spec_path)
