@@ -397,14 +397,6 @@ def disabledByArchitectureDefaults(arch, defaults, requires):
 
 
 def readDefaults(configDir, defaults, error, architecture):
-    """
-    defaultsFilename = "%s/defaults-%s.sh" % (configDir, defaults)
-    if not exists(defaultsFilename):
-      error("Default `%s' does not exists. Viable options:\n%s" %
-            (defaults or "<no defaults specified>",
-             "\n".join("- " + basename(x).replace("defaults-", "").replace(".sh", "")
-                       for x in glob(join(configDir, "defaults-*.sh")))))
-    """
     defaultsFilename = resolveDefaultsFilename(defaults, configDir)
 
     err, defaultsMeta, defaultsBody = parseRecipe(getRecipeReader(defaultsFilename))
@@ -415,12 +407,17 @@ def readDefaults(configDir, defaults, error, architecture):
     archMeta = {}
     archBody = ""
     if exists(archDefaults):
-        err, archMeta, archBody = parseRecipe(getRecipeReader(defaultsFilename))
+        err, archMeta, archBody = parseRecipe(getRecipeReader(archDefaults))
+        debug("Using architecture defaults file in: %s", archMeta)
         if err:
             error(err)
             sys.exit(1)
-        for x in ["env", "disable", "overrides"]:
-            defaultsMeta.setdefault(x, {}).update(archMeta.get(x, {}))
+    for x in ["env"]:
+        defaultsMeta.setdefault(x, {}).update(archMeta.get(x, {}))
+    for x in ["disable"]:
+        defaultsMeta.setdefault(x, []).extend(asList(archMeta.get(x, [])))
+    for x in ["overrides", "package_env"]:
+        defaultsMeta.setdefault(x, OrderedDict()).update(archMeta.get(x, {}))
         defaultsBody += "\n# Architecture defaults\n" + archBody
     return (defaultsMeta, defaultsBody)
 
@@ -757,6 +754,8 @@ def parseDefaults(disable, defaultsGetter, log):
         log("Package %s has been disabled by current default.", x)
     disable.extend(defaultsDisable)
     if type(defaultsMeta.get("overrides", OrderedDict())) != OrderedDict:
+        warning("overrides is %s, should be a dictionary", type(defaultsMeta.get("overrides")))
+        warning("The value of overrides is %s", (defaultsMeta.get("overrides")))
         return ("overrides should be a dictionary", None, None, None)
     overrides, taps = OrderedDict(), {}
     package_env = OrderedDict()
