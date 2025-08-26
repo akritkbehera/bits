@@ -678,9 +678,7 @@ def doBuild(args, parser):
         python_version_str = ""
         py_spec = specs.get("Python")
         if isinstance(py_spec, dict):
-            python_version_str = (py_spec.get("version", "") or "").lstrip("v")
-        debug("[doBuild §] Python spec version for %s: %r", spec.get("package", p), python_version_str)
-
+            python_version_str = (py_spec.get("version", "") or "").replace("v", "")
         python_version = python_version_str.split(".") if python_version_str else []
 
         # Safely extract major, minor, patch versions
@@ -692,10 +690,10 @@ def doBuild(args, parser):
         variables.update({
             "python_major_version": major,
             "python_minor_version": minor,
+            "python_patch_version": patch,
             "python_major_minor": f"{major}.{minor}",
             "python_major_minor_str": f"{major}{minor}",
         })
-    debug("[doBuild §] Python-related variables for %s: %r", spec.get("package", p), variables)
     for k, v in variables.items():
       variables[k] = resolve_spec_data(spec, v, args.defaults, branch_basename, branch_stream)
     if "source" in spec:
