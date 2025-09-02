@@ -229,6 +229,17 @@ def validateSpec(spec):
         raise SpecError("Not a YAML key / value.")
     if "package" not in spec:
         raise SpecError("Missing package field in header.")
+    if "from" in spec:
+        spec = mergeHeader(
+            spec,
+            os.path.join(
+                os.environ.get("BITS_REPO_DIR", ""),
+                spec["from"],
+                spec["package"] + ".sh"
+            ),
+            spec.get("merge_policy", {})
+        )
+    return spec
 
 
 # Use this to check if a given spec is compatible with the given default
@@ -562,6 +573,7 @@ def mergeHeader(override_spec, path_to_base_spec, mergePolicy=None, visited=None
             final_base.pop("merge_policy", None)
 
         mergedHeader = handleMergePolicy(override_spec, final_base, mergePolicy)
+        debug("&&&mergeHeader: mergedHeader is %s", mergedHeader)
         return mergedHeader
     except Exception as e:
         raise RuntimeError(f"Error during header merge: {e}")
@@ -569,88 +581,60 @@ def mergeHeader(override_spec, path_to_base_spec, mergePolicy=None, visited=None
 
 def handleMergePolicy(override_spec, final_base, mergePolicy):
 
-    inherit_keys = mergePolicy.get("inherit", [])
-    if inherit_keys is None:
-        inherit_keys = []
-    elif isinstance(inherit_keys, str):
-        inherit_keys = [inherit_keys]
+    debug("&&&mergePolicy: mergePolicy is %s", mergePolicy)
+    remove_keys = mergePolicy.get("remove", [])
+    if isinstance(remove_keys, str):
+        remove_keys = remove_keys.replace(" ", "").split(",")
+    for k in remove_keys:
+        if k in final_base:
+            debug("&&&mergePolicy: removing key %s", k)
+            final_base.pop(k, None)
+    merge_keys = mergePolicy.get("merge", [])
+    if isinstance(merge_keys, str):
+        merge_keys = merge_keys.replace(" ", "").split(",")
+    override_spec.pop("merge_policy", None)
+    override_spec.pop("from", None)
 
-    append_keys = mergePolicy.get("append", [])
-    if append_keys is None:
-        append_keys = []
-    elif isinstance(append_keys, str):
-        append_keys = [append_keys]
-    if (
-        "inherits_body" in append_keys
-        or "version" in append_keys
-        or "tag" in append_keys
-        or "source" in append_keys
-        or "from" in append_keys    
-    ):
-        raise ValueError("Cannot append single value fields")
-
-    debug(
-        "&&&mergeHeader: inherit_keys are %s, append_keys are %s",
-        inherit_keys,
-        append_keys,
-    )
-
-    for k, v in override_spec.items():
-        print(f"{k}: {type(v).__name__}")
-
-    for key in inherit_keys:
+    for key in merge_keys:
+        debug("&&&mergePolicy: processing merge key %s", key)
         if key not in override_spec:
-            override_spec[key] = final_base[key]
-
-    for key in append_keys:
-        if key not in final_base:
-            raise warning(
-                "Key '%s' is not present in %s will continue with as mentioned with current metadata.", key, override_spec['from']
-            )
-        if key not in override_spec:
-                override_spec[key] = final_base[key]
-                raise warning("Key '%s' is not present in recipe, inheriting from %s", key, override_spec['from'])
-        else: 
-            if isinstance(override_spec[key], list):
-                override_spec[key].extend(final_base[key])
-            elif isinstance(override_spec[key], OrderedDict):
-                if key in override_spec and key in final_base:
+            continue
+        if key not in final_base and key in override_spec:
+            final_base[key] = override_spec[key]
+        else:
+            if isinstance(final_base[key], OrderedDict) or isinstance(override_spec[key], OrderedDict):
                     original_value = final_base[key].copy()
                     original_value.update(override_spec[key])
                     override_spec[key] = original_value
             else:
-                raise ValueError("Append key not allowed for %s as it's of type %s", key, type(override_spec.get(key, "unknown")))
-
-    return override_spec
+                raise ValueError("Merge key not allowed for %s as it's of type %s", key, type(final_base.get(key, "unknown")))
+    for k, v in override_spec.items():
+            debug("&&&mergePolicy: overriding key %s", k)
+            final_base[k] = override_spec[k]
+    return final_base
 
 
 def getInheritedRecipe(file_path, visited=None):
     if visited is None:
         visited = set()
-
     if file_path in visited:
         return (f"Circular dependency detected involving {file_path}", None, None, visited)
-
     visited.add(file_path)
-
     try:
         with open(file_path, "r") as f:
             content = f.read()
     except IOError as e:
         debug("getInheritedRecipe: failed to read %s: %s", file_path, e)
         return (str(e), None, None, visited)
-
     try:
         header_text, recipe_body = content.split("---", 1)
     except ValueError:
         return (f"Unable to parse {file_path}. Header missing.", None, None, visited)
-
     try:
         header_spec = yamlLoad(header_text)
     except Exception as e:
         debug("getInheritedRecipe: YAML parsing error for %s: %s", file_path, e)
         return (str(e), None, None, visited)
-
     debug("&&&getInheritedRecipe: file_path=%s, header_spec=%s", file_path, header_spec)
     return (None, recipe_body, header_spec, visited)
 
@@ -694,7 +678,7 @@ def parseRecipe(reader):
         raw = reader()
         header_text, recipe = raw.split("---", 1)
         spec = yamlLoad(header_text)
-        validateSpec(spec)
+        spec = validateSpec(spec)
     except RuntimeError as e:
         err = str(e)
     except IOError as e:
@@ -711,18 +695,6 @@ def parseRecipe(reader):
 
     if err:
         return (err, spec, recipe)
-    
-    if spec and "from" in spec:
-        mergePolicy = spec.pop("merge_policy")
-        spec = mergeHeader(
-            spec,
-            os.path.join(
-                os.environ.get("BITS_REPO_DIR", ""),
-                spec["from"],
-                spec["package"] + ".sh",
-            ),
-            mergePolicy,
-        )
     
     if spec and "inherits_body" in spec:
         spec_path =os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["inherits_body"],spec["package"] + ".sh",)
@@ -791,12 +763,14 @@ def parseDefaults(disable, defaultsGetter, log):
 
 
 def checkForFilename(taps, pkg, d):
+    debug("checkForFilename: pkg=%s, d=%s, taps=%s", pkg, d, taps)
     filename = taps.get(pkg, "%s/%s.sh" % (d, pkg))
     if not exists(filename):
         if "/" in pkg:
             filename = taps.get(pkg, "%s/%s" % (d, pkg))
         else:
             filename = taps.get(pkg, "%s/%s/latest" % (d, pkg))
+    debug("checkForFilename: filename=%s", filename)
     return filename
 
 
