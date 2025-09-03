@@ -511,35 +511,48 @@ def mergeHeaderNew(spec, filename, visited=None):
     if visited is None:
         visited = set()
         for d in getConfigPaths(os.environ.get("BITS_REPO_DIR")):
-            if os.path.exists(os.path.join(d, filename)):
-                visited.add(os.path.join(d, filename))
+            candidate = os.path.join(d, filename)
+            if os.path.exists(candidate):
+                visited.add(candidate)
                 break
-    repo_name = spec["from"]
-    base_spec_path = os.path.join(
-        os.environ.get("BITS_REPO_DIR", ""), repo_name, filename
-    )
-    package=filename.rsplit(".",1)[0]
-    base_file = checkForFilename(
-        {package: base_spec_path},
-        package,
-        os.environ.get("BITS_REPO_DIR", ""),
-    )
-    if base_file in visited:
-        raise ValueError(f"Circular dependency detected: {base_file}")
-    visited.add(base_file)
-    reader = lambda: open(base_file).read()
-    assert callable(reader)
-    base_spec = yamlLoad(reader().split("---", 1)[0])
-    if "from" in base_spec:
-        base_spec = mergeHeaderNew(base_spec)
+    bases = spec.get("from")
+    if bases is None:
+        return spec
+    if isinstance(bases, str):
+        bases = [bases]
+    elif not isinstance(bases, (list, tuple)):
+        raise TypeError(f"`from` must be a string or list of strings, got: {type(bases)}")
+    merged_bases = None
+    for repo_name in bases:
+        base_spec_path = os.path.join(
+            os.environ.get("BITS_REPO_DIR", ""),
+            repo_name,
+            filename,
+        )
+        package = filename.rsplit(".", 1)[0]
+        base_file = checkForFilename({package: base_spec_path},
+                                     package,
+                                     os.environ.get("BITS_REPO_DIR", ""))
 
-    mergedHeader = handleMergePolicy(spec, base_spec)
-    return mergedHeader
-
+        if base_file in visited:
+            raise ValueError(f"Circular dependency detected: {base_file}")
+        visited.add(base_file)
+        with open(base_file, "r", encoding="utf-8") as f:
+            base_header_text = f.read().split("---", 1)[0]
+        base_spec = yamlLoad(base_header_text)
+        if "from" in base_spec:
+            base_spec = mergeHeaderNew(base_spec, filename, visited)
+        if merged_bases is None:
+            merged_bases = base_spec
+        else:
+            merged_bases = handleMergePolicy(base_spec, merged_bases)
+    if merged_bases is None:
+        return spec
+    merged_header = handleMergePolicy(spec, merged_bases)
+    return merged_header
 
 def handleMergePolicy(override_spec, final_base):
     mergePolicy = override_spec.get("merge_policy", {})
-    debug("&&&mergePolicy: mergePolicy is %s", mergePolicy)
     remove_keys = mergePolicy.get("remove", [])
     if isinstance(remove_keys, str):
         remove_keys = remove_keys.replace(" ", "").split(",")
@@ -554,7 +567,6 @@ def handleMergePolicy(override_spec, final_base):
     override_spec.pop("from", None)
 
     for key in merge_keys:
-        debug("&&&mergePolicy: processing merge key %s", key)
         if key not in override_spec:
             continue
         if key not in final_base and key in override_spec:
@@ -567,7 +579,6 @@ def handleMergePolicy(override_spec, final_base):
             else:
                 raise ValueError("Merge key not allowed for %s as it's of type %s", key, type(final_base.get(key, "unknown")))
     for k, v in override_spec.items():
-            debug("&&&mergePolicy: overriding key %s", k)
             final_base[k] = override_spec[k]
     return final_base
 
