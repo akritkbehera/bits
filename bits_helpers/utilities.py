@@ -510,13 +510,11 @@ def yamlDump(s):
 def mergeHeaderNew(spec, filename, visited=None):
     if visited is None:
         visited = set()
-        debug("&&&mergeHeaderNew: filename is %s", filename)
-        #filename = spec.get("package").lower() + ".sh"
         for d in getConfigPaths(os.environ.get("BITS_REPO_DIR")):
             if os.path.exists(os.path.join(d, filename)):
                 visited.add(os.path.join(d, filename))
                 break
-    repo_name = spec["from"][0] if isinstance(spec["from"], list) else spec["from"]
+    repo_name = spec["from"]
     base_spec_path = os.path.join(
         os.environ.get("BITS_REPO_DIR", ""), repo_name, filename
     )
@@ -536,7 +534,6 @@ def mergeHeaderNew(spec, filename, visited=None):
         base_spec = mergeHeaderNew(base_spec)
 
     mergedHeader = handleMergePolicy(spec, base_spec)
-    debug("&&&mergeHeaderNew: mergedHeader is %s", mergedHeader)
     return mergedHeader
 
 
@@ -574,60 +571,33 @@ def handleMergePolicy(override_spec, final_base):
             final_base[k] = override_spec[k]
     return final_base
 
-
-def getInheritedRecipe(file_path, visited=None):
+def getRecipe(spec, filename, visited=None):
     if visited is None:
         visited = set()
-    if file_path in visited:
-        return (f"Circular dependency detected involving {file_path}", None, None, visited)
-    visited.add(file_path)
-    try:
-        with open(file_path, "r") as f:
-            content = f.read()
-    except IOError as e:
-        debug("getInheritedRecipe: failed to read %s: %s", file_path, e)
-        return (str(e), None, None, visited)
-    try:
-        header_text, recipe_body = content.split("---", 1)
-    except ValueError:
-        return (f"Unable to parse {file_path}. Header missing.", None, None, visited)
-    try:
-        header_spec = yamlLoad(header_text)
-    except Exception as e:
-        debug("getInheritedRecipe: YAML parsing error for %s: %s", file_path, e)
-        return (str(e), None, None, visited)
-    debug("&&&getInheritedRecipe: file_path=%s, header_spec=%s", file_path, header_spec)
-    return (None, recipe_body, header_spec, visited)
-
-
-def resolveRecipeInheritance(file, visited=None):
-    err, recipe_body, header_spec, updated_visited = getInheritedRecipe(file, visited)
-    if err:
-        return (err, None)
-
-    if header_spec and isinstance(header_spec, dict) and "inherits_body" in header_spec:
-        if header_spec["inherits_body"]:
-            if recipe_body and recipe_body.strip():
-                warning(
-                    "Recipe in %s is not empty and will be ignored due to inheritance from %s in %s",
-                    header_spec.get("package"),
-                    header_spec.get("package"),
-                    header_spec["inherits_body"],
-                )
-            inherit_file = os.path.join(
-                os.environ.get("BITS_REPO_DIR", ""),
-                header_spec["inherits_body"],
-                header_spec["package"] + ".sh",
-            )
-            debug(
-                "resolveRecipeInheritance: delegating to %s (package=%s)",
-                inherit_file,
-                header_spec.get("package"),
-            )
-            return resolveRecipeInheritance(inherit_file, updated_visited)
-
-    return (None, recipe_body)
-
+        for d in getConfigPaths(os.environ.get("BITS_REPO_DIR")):
+            if os.path.exists(os.path.join(d, filename)):
+                visited.add(os.path.join(d, filename))
+                break
+    repo_name = spec["inherits_body"]
+    base_spec_path = os.path.join(
+        os.environ.get("BITS_REPO_DIR", ""), repo_name, filename
+    )
+    package=filename.rsplit(".",1)[0]
+    base_file = checkForFilename(
+        {package: base_spec_path},
+        package,
+        os.environ.get("BITS_REPO_DIR", ""),
+    )
+    if base_file in visited:
+        raise ValueError(f"Circular dependency detected: {base_file}")
+    visited.add(base_file)
+    reader = lambda: open(base_file).read()
+    assert callable(reader)
+    spec,recipe = reader().split("---", 1)
+    spec = yamlLoad(spec)
+    if "inherits_body" in spec:
+        recipe = getRecipe(spec, filename, visited)
+    return recipe
 
 def parseRecipe(reader):
     assert callable(reader), "reader must be callable"
@@ -643,7 +613,6 @@ def parseRecipe(reader):
         spec = yamlLoad(header_text)
         if "from" in spec:
             spec = mergeHeaderNew(spec, filename)
-            debug("&&&parseRecipe: merged spec is %s", spec)
         spec = validateSpec(spec)
 
     except RuntimeError as e:
@@ -664,17 +633,7 @@ def parseRecipe(reader):
         return (err, spec, recipe)
     
     if spec and "inherits_body" in spec:
-        spec_path =os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["inherits_body"],spec["package"] + ".sh",)
-        debug("&&&spech_path is %s", spec_path)
-        inherited_err, recipe = resolveRecipeInheritance(
-            os.path.join(
-                os.environ.get("BITS_REPO_DIR", ""),
-                spec["inherits_body"],
-                spec["package"] + ".sh",
-            )
-        )
-        if inherited_err:
-            dieOnError("Error while resolving inheritance: %s", inherited_err)
+        recipe = getRecipe(spec, filename)
 
     return (err, spec, recipe)
 
