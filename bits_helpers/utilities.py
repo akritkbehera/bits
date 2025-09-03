@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from csv import reader
 import yaml
 from os.path import exists
 import hashlib
@@ -229,16 +230,6 @@ def validateSpec(spec):
         raise SpecError("Not a YAML key / value.")
     if "package" not in spec:
         raise SpecError("Missing package field in header.")
-    if "from" in spec:
-        spec = mergeHeader(
-            spec,
-            os.path.join(
-                os.environ.get("BITS_REPO_DIR", ""),
-                spec["from"],
-                spec["package"] + ".sh"
-            ),
-            spec.get("merge_policy", {})
-        )
     return spec
 
 
@@ -408,6 +399,8 @@ def disabledByArchitectureDefaults(arch, defaults, requires):
 
 
 def readDefaults(configDir, defaults, error, architecture):
+    debug("ConfigDir: %s", configDir)
+    debug("The BITS_REPO_DIR is %s", os.environ.get("BITS_REPO_DIR", "BITS_REPO_DIR not set"))
     defaultsFilename = resolveDefaultsFilename(defaults, configDir)
 
     err, defaultsMeta, defaultsBody = parseRecipe(getRecipeReader(defaultsFilename))
@@ -514,73 +507,41 @@ def yamlDump(s):
     return yaml.dump(s, Dumper=YamlOrderedDumper)
 
 
-def mergeHeader(override_spec, path_to_base_spec, mergePolicy=None, visited=None):
-    base_err, base_body, base, updated_visited = getInheritedRecipe(
-        path_to_base_spec, visited
+def mergeHeaderNew(spec, filename, visited=None):
+    if visited is None:
+        visited = set()
+        debug("&&&mergeHeaderNew: filename is %s", filename)
+        #filename = spec.get("package").lower() + ".sh"
+        for d in getConfigPaths(os.environ.get("BITS_REPO_DIR")):
+            if os.path.exists(os.path.join(d, filename)):
+                visited.add(os.path.join(d, filename))
+                break
+    repo_name = spec["from"][0] if isinstance(spec["from"], list) else spec["from"]
+    base_spec_path = os.path.join(
+        os.environ.get("BITS_REPO_DIR", ""), repo_name, filename
     )
-    debug("&&&mergeHeader: base is %s", base)
-
-    debug(
-        "type(override_spec) is %s, type(base) is %s", type(override_spec), type(base)
+    package=filename.rsplit(".",1)[0]
+    base_file = checkForFilename(
+        {package: base_spec_path},
+        package,
+        os.environ.get("BITS_REPO_DIR", ""),
     )
+    if base_file in visited:
+        raise ValueError(f"Circular dependency detected: {base_file}")
+    visited.add(base_file)
+    reader = lambda: open(base_file).read()
+    assert callable(reader)
+    base_spec = yamlLoad(reader().split("---", 1)[0])
+    if "from" in base_spec:
+        base_spec = mergeHeaderNew(base_spec)
 
-    if base_err:
-        raise RuntimeError(
-            f"Error reading base spec from {path_to_base_spec}: {base_err}"
-        )
-
-    if not isinstance(override_spec, dict):
-        raise ValueError("override_spec must be a dictionary")
-    if base is None:
-        raise ValueError("Base spec is required for merging headers")
-    if not isinstance(base, dict):
-        raise ValueError("Base must be a dictionary")
-    if mergePolicy is None:
-        raise ValueError("mergePolicy must be provided for merging headers")
-    if "from" not in override_spec or not override_spec["from"]:
-        raise ValueError("override_spec must have a 'from' field")
-    if override_spec["package"] != base["package"]:
-        raise ValueError(
-            f"Cannot merge headers of different packages: {override_spec['package']} != {base['package']}"
-        )
-
-    debug(
-        "&&&mergeHeader: override_spec is %s, base is %s",
-        override_spec.get("from", ["unknown"])[0],
-        base.get("from", ["unknown"])[0],
-    )
-
-    try:
-        if "from" not in base or not base["from"]:
-            final_base = base
-            debug("&&&mergeHeader: base has no 'from' field, using it as final_base")
-            debug("&&&mergeHeader: final_base is %s", final_base)
-        else:
-            base_repo = (
-                base["from"][0] if isinstance(base["from"], list) else base["from"]
-            )
-            base_path = os.path.join(
-                os.environ.get("BITS_REPO_DIR", ""),
-                base_repo,
-                base["package"] + ".sh",
-            )
-            final_base = mergeHeader(
-                base,
-                base_path,
-                base.get("merge_policy", {}),
-                updated_visited,
-            )
-            final_base.pop("merge_policy", None)
-
-        mergedHeader = handleMergePolicy(override_spec, final_base, mergePolicy)
-        debug("&&&mergeHeader: mergedHeader is %s", mergedHeader)
-        return mergedHeader
-    except Exception as e:
-        raise RuntimeError(f"Error during header merge: {e}")
+    mergedHeader = handleMergePolicy(spec, base_spec)
+    debug("&&&mergeHeaderNew: mergedHeader is %s", mergedHeader)
+    return mergedHeader
 
 
-def handleMergePolicy(override_spec, final_base, mergePolicy):
-
+def handleMergePolicy(override_spec, final_base):
+    mergePolicy = override_spec.get("merge_policy", {})
     debug("&&&mergePolicy: mergePolicy is %s", mergePolicy)
     remove_keys = mergePolicy.get("remove", [])
     if isinstance(remove_keys, str):
@@ -670,6 +631,8 @@ def resolveRecipeInheritance(file, visited=None):
 
 def parseRecipe(reader):
     assert callable(reader), "reader must be callable"
+    filename = os.path.basename(reader.url)
+
     err = None
     spec = None
     recipe = None
@@ -678,7 +641,11 @@ def parseRecipe(reader):
         raw = reader()
         header_text, recipe = raw.split("---", 1)
         spec = yamlLoad(header_text)
+        if "from" in spec:
+            spec = mergeHeaderNew(spec, filename)
+            debug("&&&parseRecipe: merged spec is %s", spec)
         spec = validateSpec(spec)
+
     except RuntimeError as e:
         err = str(e)
     except IOError as e:
@@ -770,7 +737,7 @@ def checkForFilename(taps, pkg, d):
             filename = taps.get(pkg, "%s/%s" % (d, pkg))
         else:
             filename = taps.get(pkg, "%s/%s/latest" % (d, pkg))
-    debug("checkForFilename: filename=%s", filename)
+    debug("##checkForFilename: filename=%s", filename)
     return filename
 
 
@@ -781,10 +748,11 @@ def getConfigPaths(configDir):
         for d in [join(configDir, "%s.bits" % r) for r in configPath.split(",") if r]:
             if exists(d):
                 pkgDirs.append(d)
+    debug("##getConfigPaths: pkgDirs=%s", pkgDirs)
     return pkgDirs
 
-
 def resolveFilename(taps, pkg, configDir, genPackages):
+    debug("resolveFilename: pkg=%s, configDir=%s", pkg, configDir)
     if pkg in genPackages:
         return (
             "generate:%s@%s" % (pkg, genPackages[pkg]["version"]),
@@ -794,10 +762,10 @@ def resolveFilename(taps, pkg, configDir, genPackages):
     for d in getConfigPaths(configDir):
         filename = checkForFilename(taps, pkg, d)
         if exists(filename):
+            debug("resolveFilename: found filename %s in %s", filename, d)
             return (filename, os.path.abspath(d))
 
     dieOnError(True, "Package %s not found in %s" % (pkg, configDir))
-
 
 def resolveDefaultsFilename(defaults, configDir):
     configPath = os.environ.get("BITS_PATH")
@@ -851,6 +819,7 @@ def getPackageList(
     validDefaults = (
         []
     )  # empty list: all OK; None: no valid default; non-empty list: list of valid ones
+    visited = set()
 
     while packages:
         p = packages.pop(0)
