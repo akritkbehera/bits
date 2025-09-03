@@ -419,6 +419,98 @@ def yamlDump(s):
   YamlOrderedDumper.add_representer(OrderedDict, represent_ordereddict)
   return yaml.dump(s, Dumper=YamlOrderedDumper)
 
+def mergeHeaderNew(spec, filename, visited=None):
+    if visited is None:
+        visited = set()
+        for d in getConfigPaths(os.environ.get("BITS_REPO_DIR")):
+            if os.path.exists(os.path.join(d, filename)):
+                visited.add(os.path.join(d, filename))
+                break
+    repo_name = spec["from"]
+    base_spec_path = os.path.join(
+        os.environ.get("BITS_REPO_DIR", ""), repo_name, filename
+    )
+    package=filename.rsplit(".",1)[0]
+    base_file = checkForFilename(
+        {package: base_spec_path},
+        package,
+        os.environ.get("BITS_REPO_DIR", ""),
+    )
+    if base_file in visited:
+        raise ValueError(f"Circular dependency detected: {base_file}")
+    visited.add(base_file)
+    reader = lambda: open(base_file).read()
+    assert callable(reader)
+    base_spec = yamlLoad(reader().split("---", 1)[0])
+    if "from" in base_spec:
+        base_spec = mergeHeaderNew(base_spec)
+
+    mergedHeader = handleMergePolicy(spec, base_spec)
+    return mergedHeader
+
+
+def handleMergePolicy(override_spec, final_base):
+    mergePolicy = override_spec.get("merge_policy", {})
+    debug("&&&mergePolicy: mergePolicy is %s", mergePolicy)
+    remove_keys = mergePolicy.get("remove", [])
+    if isinstance(remove_keys, str):
+        remove_keys = remove_keys.replace(" ", "").split(",")
+    for k in remove_keys:
+        if k in final_base:
+            debug("&&&mergePolicy: removing key %s", k)
+            final_base.pop(k, None)
+    merge_keys = mergePolicy.get("merge", [])
+    if isinstance(merge_keys, str):
+        merge_keys = merge_keys.replace(" ", "").split(",")
+    override_spec.pop("merge_policy", None)
+    override_spec.pop("from", None)
+
+    for key in merge_keys:
+        debug("&&&mergePolicy: processing merge key %s", key)
+        if key not in override_spec:
+            continue
+        if key not in final_base and key in override_spec:
+            final_base[key] = override_spec[key]
+        else:
+            if isinstance(final_base[key], OrderedDict) or isinstance(override_spec[key], OrderedDict):
+                    original_value = final_base[key].copy()
+                    original_value.update(override_spec[key])
+                    override_spec[key] = original_value
+            else:
+                raise ValueError("Merge key not allowed for %s as it's of type %s", key, type(final_base.get(key, "unknown")))
+    for k, v in override_spec.items():
+            debug("&&&mergePolicy: overriding key %s", k)
+            final_base[k] = override_spec[k]
+    return final_base
+
+def getRecipe(spec, filename, visited=None):
+    if visited is None:
+        visited = set()
+        for d in getConfigPaths(os.environ.get("BITS_REPO_DIR")):
+            if os.path.exists(os.path.join(d, filename)):
+                visited.add(os.path.join(d, filename))
+                break
+    repo_name = spec["inherits_body"]
+    base_spec_path = os.path.join(
+        os.environ.get("BITS_REPO_DIR", ""), repo_name, filename
+    )
+    package=filename.rsplit(".",1)[0]
+    base_file = checkForFilename(
+        {package: base_spec_path},
+        package,
+        os.environ.get("BITS_REPO_DIR", ""),
+    )
+    if base_file in visited:
+        raise ValueError(f"Circular dependency detected: {base_file}")
+    visited.add(base_file)
+    reader = lambda: open(base_file).read()
+    assert callable(reader)
+    spec,recipe = reader().split("---", 1)
+    spec = yamlLoad(spec)
+    if "inherits_body" in spec:
+        recipe = getRecipe(spec, filename, visited)
+    return recipe
+
 def parseRecipe(reader):
   assert(reader.__call__)
   err, spec, recipe = (None, None, None)
