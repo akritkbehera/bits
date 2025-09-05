@@ -421,11 +421,16 @@ def yamlDump(s):
 
 def parseRecipe(reader):
   assert(reader.__call__)
+  filename = os.path.basename(getattr(reader, "url", None) or "")[:-3] if (getattr(reader, "url", None) or "").endswith(".sh") else os.path.basename(getattr(reader, "url", None) or "")
   err, spec, recipe = (None, None, None)
   try:
     d = reader()
     header,recipe = d.split("---", 1)
     spec = yamlLoad(header)
+    if not filename:
+      filename = spec["package"]
+    if "from" in spec:
+      spec = getSpecFromDir(spec, filename, os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["from"]))
     validateSpec(spec)
   except RuntimeError as e:
     err = str(e)
@@ -727,6 +732,62 @@ def getGeneratedPackages(configDir):
       sys.modules.pop('packages')
       x=sys.path.pop(0)
   return pkgs
+
+def getSpecFromDir(override_spec, pkg, configDir=None, visited=None):
+    if visited is None:
+        visited = set()
+    if not configDir:
+        configDir = os.environ.get("BITS_REPO_DIR")
+    genPackages = getGeneratedPackages(configDir)
+    try:
+        key = (pkg, os.path.abspath(configDir))
+        if key in visited:
+            raise RuntimeError("Circular dependency detected")
+        visited.add(key)
+
+        taps = {}
+        filename, pkgdir = resolveFilename(taps, pkg, configDir, genPackages)
+        reader = getRecipeReader(filename, configDir, genPackages)
+        d = reader()
+        header, recipe = d.split("---", 1)
+        spec = yamlLoad(header)
+        if "from" in spec:
+            new_config_dir = os.path.join(os.path.dirname(configDir), spec["from"])
+            final_base = getSpecFromDir(spec, pkg, new_config_dir, visited)
+            return handleMergePolicy(override_spec, final_base)
+        return handleMergePolicy(override_spec, spec)
+    except Exception as e:
+        return None
+    
+def handleMergePolicy(override_spec, final_base):
+    mergePolicy = override_spec.get("merge_policy", {})
+    remove_keys = mergePolicy.get("remove", [])
+    if isinstance(remove_keys, str):
+        remove_keys = remove_keys.replace(" ", "").split(",")
+    for k in remove_keys:
+        if k in final_base:
+            final_base.pop(k, None)
+    merge_keys = mergePolicy.get("merge", [])
+    if isinstance(merge_keys, str):
+        merge_keys = merge_keys.replace(" ", "").split(",")
+    override_spec.pop("merge_policy", None)
+    override_spec.pop("from", None)
+
+    for key in merge_keys:
+        if key not in override_spec:
+            continue
+        if key not in final_base:
+            final_base[key] = override_spec[key]
+        else:
+            if isinstance(final_base[key], OrderedDict) and isinstance(override_spec[key], OrderedDict):
+                merged = final_base[key].copy()
+                merged.update(override_spec[key])
+                final_base[key] = merged
+            else:
+                raise ValueError(f"Merge key not allowed for {key} as it's of type {type(final_base.get(key, 'unknown'))}")
+    for k, v in override_spec.items():
+            final_base[k] = override_spec[k]
+    return final_base
 
 class Hasher:
   def __init__(self) -> None:
