@@ -277,7 +277,7 @@ def doDetectArch(hasOsRelease, osReleaseLines, platformTuple, platformSystem, pl
 # possibly compatible linux distributions, but tries to get right the
 # common one, obvious one. If you use a Unknownbuntu which is compatible
 # with Ubuntu 15.10 you will still have to give an explicit platform
-# string. 
+# string.
 #
 # FIXME: we should have a fallback for lsb_release, since platform.dist
 # is going away.
@@ -356,20 +356,24 @@ def readDefaults(configDir, defaults, error, architecture):
     defaultsBody += "\n# Architecture defaults\n" + archBody
   return (defaultsMeta, defaultsBody)
 
-
-def getRecipeReader(url:str , dist=None, genPackages={}):
-  m = re.search(r'^(dist|generate):(.*)@([^@]+)$', url)
-  if m and m.group(1) == "generate":
-    return GeneratedPackage(genPackages[m.group(2)]["command"])
-  elif m and dist:
-    return GitReader(url, dist)
-  else:
-    return FileReader(url)
+def getRecipeReader(url: str, dist=None, genPackages={}):
+    m = re.search(r'^(dist|generate):(.*)@([^@]+)$', url)
+    if m and m.group(1) == "generate":
+        pkg, version = m.group(2), m.group(3)
+        # search across all generated dirs
+        if pkg in genPackages and genPackages[pkg]["version"] == version:
+            return GeneratedPackage(genPackages[pkg])
+        raise ValueError(f"Generated package {pkg}@{version} not found")
+    elif m and dist:
+        return GitReader(url, dist)
+    else:
+        return FileReader(url)
 
 # Generate a recipe of package
 class GeneratedPackage(object):
-  def __init__(self, command) -> None:
-    self.command = command
+  def __init__(self, obj) -> None:
+    self.command = obj["command"]
+    self.url = obj["url"]
   def __call__(self):
     return  getoutput(self.command).strip()
 
@@ -419,30 +423,45 @@ def yamlDump(s):
   YamlOrderedDumper.add_representer(OrderedDict, represent_ordereddict)
   return yaml.dump(s, Dumper=YamlOrderedDumper)
 
-def parseRecipe(reader):
-  assert(reader.__call__)
-  err, spec, recipe = (None, None, None)
-  try:
-    d = reader()
-    header,recipe = d.split("---", 1)
-    spec = yamlLoad(header)
-    validateSpec(spec)
-  except RuntimeError as e:
-    err = str(e)
-  except IOError as e:
-    err = str(e)
-  except SpecError as e:
-    err = "Malformed header for %s\n%s" % (reader.url, str(e))
-  except yaml.scanner.ScannerError as e:
-    err = "Unable to parse %s\n%s" % (reader.url, str(e))
-  except yaml.parser.ParserError as e:
-    err = "Unable to parse %s\n%s" % (reader.url, str(e))
-  except ValueError:
-    err = "Unable to parse %s. Header missing." % reader.url
-  return err, spec, recipe
+def parseRecipe(reader, generatePackages=None, visited=None):
+    assert(reader.__call__)
+    basename = os.path.basename(getattr(reader, "url", "") or "")
+    filename = basename[:-3] if basename.endswith(".sh") else basename
+    err, spec, recipe = (None, None, None)
+    try:
+        d = reader()
+        header,recipe = d.split("---", 1)
+        spec = yamlLoad(header)
+        if "from" in spec:
+            if visited is None:
+                visited = set()
+            repoDir = os.path.abspath(os.environ.get("BITS_REPO_DIR"))
+            if spec["from"] in visited:
+                raise RuntimeError(f"🔄 Cyclic Dependency: {' -> '.join(list(visited) + [spec['from']])}")
+            visited.add(spec["from"])
+            parent_dir = os.path.join(repoDir, spec["from"])
+            base_filename, pkgdir = resolveFilename({}, filename, parent_dir, generatePackages)
+            base_reader = getRecipeReader(base_filename, repoDir, generatePackages[parent_dir])
+            err, base_spec, base_recipe = parseRecipe(base_reader, generatePackages, visited)
+            spec, recipe_append = handleMergePolicy(spec, base_spec)
+            recipe = recipe + base_recipe if recipe_append else recipe
+        validateSpec(spec)
+    except RuntimeError as e:
+        err = str(e)
+    except IOError as e:
+        err = str(e)
+    except SpecError as e:
+        err = "Malformed header for %s\n%s" % (reader.url, str(e))
+    except yaml.scanner.ScannerError as e:
+        err = "Unable to parse %s\n%s" % (reader.url, str(e))
+    except yaml.parser.ParserError as e:
+        err = "Unable to parse %s\n%s" % (reader.url, str(e))
+    except ValueError as e:
+       err = "Unable to parse %s\n%s" % (reader.url, str(e))
+    except Exception as e:
+        err = "Unable to parse %s\n%s" % (reader.url, str(e))
+    return err, spec, recipe
 
-# (Almost pure part of the defaults parsing)
-# Override defaultsGetter for unit tests.
 def parseDefaults(disable, defaultsGetter, log):
   defaultsMeta, defaultsBody = defaultsGetter()
   # Defaults are actually special packages. They can override metadata
@@ -476,26 +495,31 @@ def checkForFilename(taps, pkg, d):
   return filename
 
 def getConfigPaths(configDir):
-  configPath = os.environ.get("BITS_PATH")
-  pkgDirs = [configDir]
+    configPath = os.environ.get("BITS_PATH")
+    pkgDirs = [configDir]
 
-  if configPath:
-    for d in [join(configDir, "%s.bits" % r) for r in configPath.split(",") if r]:
-       if exists(d):
-         pkgDirs.append(d)
-  return pkgDirs
+    if configPath:
+        for d in [join(configDir, "%s.bits" % r) for r in configPath.split(",") if r]:
+            if exists(d):
+                pkgDirs.append(d)
+    return pkgDirs
 
-def resolveFilename(taps, pkg, configDir, genPackages):
-  if pkg in genPackages:
-    return ("generate:%s@%s" % (pkg, genPackages[pkg]["version"]), genPackages[pkg]["pkgdir"])
+def resolveFilename(taps, pkg, configDir, generatedPackages):
+    search_dirs = []
+    for d in getConfigPaths(configDir):
+        if d not in search_dirs:
+            search_dirs.append(d)
 
-  for d in getConfigPaths(configDir):
-    filename = checkForFilename(taps,pkg,d)
-    if exists(filename):
-      return(filename,os.path.abspath(d))
+    for d in search_dirs:
+        if generatedPackages is not None and d in generatedPackages and pkg in generatedPackages[d]:
+            meta = generatedPackages[d][pkg]
+            return ("generate:%s@%s" % (pkg, meta["version"]), meta["pkgdir"])
 
-  dieOnError(True, "Package %s not found in %s" % (pkg, configDir))
-    
+        filename = checkForFilename(taps, pkg, d)
+        if exists(filename):
+            return (filename, os.path.abspath(d))
+    return None, None
+
 def resolveDefaultsFilename(defaults, configDir):
   configPath = os.environ.get("BITS_PATH")
   cfgDir = configDir
@@ -518,7 +542,7 @@ def resolveDefaultsFilename(defaults, configDir):
            "\n".join("- " + basename(x).replace("defaults-", "").replace(".sh", "")
                      for x in glob(join(configDir, "defaults-*.sh")))))
   '''
-  
+
 def getPackageList(packages, specs, configDir, preferSystem, noSystem,
                    architecture, disable, defaults, performPreferCheck, performRequirementCheck,
                    performValidateDefaults, overrides, taps, log, force_rebuild=()):
@@ -551,7 +575,7 @@ def getPackageList(packages, specs, configDir, preferSystem, noSystem,
     dieOnError(not filename, "Package %s not found in %s" % (p, configDir))
     assert(filename is not None)
 
-    err, spec, recipe = parseRecipe(getRecipeReader(filename, configDir, generatedPackages))
+    err, spec, recipe = parseRecipe(getRecipeReader(filename, configDir, generatedPackages[pkgdir]), generatedPackages)
     dieOnError(err, err)
     # Unless there was an error, both spec and recipe should be valid.
     # otherwise the error should have been caught above.
@@ -717,16 +741,66 @@ def getPackageList(packages, specs, configDir, preferSystem, noSystem,
   return (systemPackages, ownPackages, failedRequirements, validDefaults)
 
 def getGeneratedPackages(configDir):
-  pkgs = {}
-  pkgDirs = getConfigPaths(configDir)
-  for pkgdir in pkgDirs:
-    for vp in [x.split(os.sep)[-2] for x in  glob(join(pkgdir,"*","packages.py"))]:
-      sys.path.insert(0,join(pkgdir, vp))
-      pkg = __import__("packages")
-      pkg.getPackages(pkgs, pkgdir)
-      sys.modules.pop('packages')
-      x=sys.path.pop(0)
-  return pkgs
+    all_pkgs = {}
+    pkgDirs = getConfigPaths(configDir)
+    for pkgdir in pkgDirs:
+        dir_pkgs = {}
+        for vp in [x.split(os.sep)[-2] for x in glob(join(pkgdir, "*", "packages.py"))]:
+            sys.path.insert(0, join(pkgdir, vp))
+            pkg = __import__("packages")
+            pkg.getPackages(dir_pkgs, pkgdir)
+            sys.modules.pop("packages")
+            sys.path.pop(0)
+        all_pkgs[pkgdir] = dir_pkgs
+    return all_pkgs
+
+
+def handleMergePolicy(override_spec, final_base):
+    mergePolicy = override_spec.get("merge_policy", {})
+    remove_keys = mergePolicy.get("remove", [])
+    force_inherit = mergePolicy.get("inherit", [])
+    if isinstance(remove_keys, str):
+        remove_keys = remove_keys.replace(" ", "").split(",")
+    recipe_append = "recipe" not in remove_keys
+    for k in remove_keys:
+        if k in final_base:
+            final_base.pop(k, None)
+    if isinstance(force_inherit, str):
+        force_inherit = force_inherit.replace(" ", "").split(",")
+    for key in force_inherit:
+        if key in final_base:
+            override_spec[key] = final_base[key]
+    merge_keys = mergePolicy.get("merge", [])
+    if isinstance(merge_keys, str):
+        merge_keys = merge_keys.replace(" ", "").split(",")
+    override_spec.pop("merge_policy", None)
+    override_spec.pop("from", None)
+    for key in merge_keys:
+        if key not in override_spec:
+            raise ValueError(f"Merge key {key} not found in override spec")
+        if key not in final_base:
+            final_base[key] = override_spec[key]
+        else:
+            if isinstance(final_base[key], OrderedDict) and isinstance(
+                override_spec[key], OrderedDict
+            ):
+                merged = final_base[key].copy()
+                merged.update(override_spec[key])
+                final_base[key] = merged
+            elif isinstance(final_base[key], list) and isinstance(
+                override_spec[key], list
+            ):
+                for x in override_spec[key]:
+                    if x not in final_base[key]:
+                        final_base[key].append(x)
+            else:
+                raise ValueError(
+                    f"Merge key not allowed for {key} as it's of type {type(final_base.get(key, 'unknown'))}"
+                )
+        override_spec.pop(key)
+    for k, v in override_spec.items():
+        final_base[k] = override_spec[k]
+    return final_base, recipe_append
 
 class Hasher:
   def __init__(self) -> None:
