@@ -174,7 +174,7 @@ def resolve_spec_data(spec, data, defaults, branch_basename="", branch_stream=""
   #   final: %%(%(v1)s_key)s
   # "final" will have the value "bar" (first expanded to "%(foo_key)s" and
   # then to value of "foo_key" i.e. "bar")
-  while re.search("\%\([a-zA-Z][a-zA-Z0-9_]*\)s", data):
+  while re.search(r"\%\([a-zA-Z][a-zA-Z0-9_]*\)s", data):
     data = data % all_vars
   return data
 
@@ -745,7 +745,13 @@ def getSpecFromDir(override_spec, pkg, configDir, visited=None):
     visited.add(pkgdir)
     reader = getRecipeReader(filename, configDir, genPackages)
     d = reader()
-    header, recipe = d.split("---", 1)
+    # Handle auto-generated packages that may not have "---" separator
+    if "---" in d:
+        header, recipe = d.split("---", 1)
+    else:
+        # For auto-generated packages, treat entire content as header
+        header = d
+        recipe = ""
     spec = yamlLoad(header)
     if "from" in spec:
         new_config_dir = os.path.join(os.path.dirname(configDir), spec["from"])
