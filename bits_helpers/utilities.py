@@ -430,8 +430,11 @@ def parseRecipe(reader):
     if not filename:
       filename = spec["package"]
     if "from" in spec:
-      spec = getSpecFromDir(spec, filename, os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["from"]))
+      configDir = os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["from"])
+      spec = getSpecFromDir(spec, filename or spec["package"], os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["from"]))
     validateSpec(spec)
+    if "inherits_body" in spec:
+      recipe = getRecipeFromDir(filename or spec["package"], os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["inherits_body"]))
   except RuntimeError as e:
     err = str(e)
   except IOError as e:
@@ -745,7 +748,7 @@ def getSpecFromDir(override_spec, pkg, configDir, visited=None):
     visited.add(pkgdir)
     reader = getRecipeReader(filename, configDir, genPackages)
     d = reader()
-    header = d.split("---", 1)
+    header, recipe = d.split("---", 1)
     spec = yamlLoad(header)
     if "from" in spec:
         new_config_dir = os.path.join(os.path.dirname(configDir), spec["from"])
@@ -756,11 +759,17 @@ def getSpecFromDir(override_spec, pkg, configDir, visited=None):
 def handleMergePolicy(override_spec, final_base):
     mergePolicy = override_spec.get("merge_policy", {})
     remove_keys = mergePolicy.get("remove", [])
+    force_inherit = mergePolicy.get("inherit", [])
     if isinstance(remove_keys, str):
         remove_keys = remove_keys.replace(" ", "").split(",")
     for k in remove_keys:
         if k in final_base:
             final_base.pop(k, None)
+    if isinstance(force_inherit, str):
+        force_inherit = force_inherit.replace(" ", "").split(",")
+    for key in force_inherit:
+        if key in final_base:
+            override_spec[key] = final_base[key]
     merge_keys = mergePolicy.get("merge", [])
     if isinstance(merge_keys, str):
         merge_keys = merge_keys.replace(" ", "").split(",")
@@ -779,6 +788,7 @@ def handleMergePolicy(override_spec, final_base):
                 final_base[key] = merged
             else:
                 raise ValueError(f"Merge key not allowed for {key} as it's of type {type(final_base.get(key, 'unknown'))}")
+        override_spec.pop(key)
     for k, v in override_spec.items():
             final_base[k] = override_spec[k]
     return final_base
