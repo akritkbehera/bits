@@ -430,11 +430,13 @@ def parseRecipe(reader):
     if not filename:
       filename = spec["package"]
     if "from" in spec:
-      configDir = os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["from"])
-      spec = getSpecFromDir(spec, filename or spec["package"], os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["from"]))
+      specDir = os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["from"])
+      spec = getSpecFromDir(spec, filename or spec["package"], specDir)
+      debug("The merged spec is %s", spec)
     validateSpec(spec)
     if "inherits_body" in spec:
-      recipe = getRecipeFromDir(filename or spec["package"], os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["inherits_body"]))
+      recipeDir=os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["inherits_body"])
+      recipe = getRecipeFromDir(filename or spec["package"], recipeDir)
   except RuntimeError as e:
     err = str(e)
   except IOError as e:
