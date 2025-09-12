@@ -16,7 +16,7 @@ from shlex import quote
 from bits_helpers.cmd import getoutput
 from bits_helpers.git import git
 
-from bits_helpers.log import error, warning, dieOnError
+from bits_helpers.log import error, warning, dieOnError, debug
 
 class SpecError(Exception):
   pass
@@ -423,6 +423,9 @@ def parseRecipe(reader):
   assert(reader.__call__)
   basename = os.path.basename(getattr(reader, "url", "") or "")
   filename = basename[:-3] if basename.endswith(".sh") else basename
+  debug("Parsing recipe %s", reader.url)
+  debug("Filename is %s", filename)
+  debug("Basename is %s", basename)
   err, spec, recipe = (None, None, None)
   try:
     d = reader()
@@ -430,11 +433,14 @@ def parseRecipe(reader):
     spec = yamlLoad(header)
     if "from" in spec:
       specDir = os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["from"])
-      spec = getSpecFromDir(spec, filename or spec["package"], specDir)
+      spec_visited = set()
+      recipe_visited = set()
+      spec = getSpecFromDir(spec, filename or spec["package"], specDir, spec_visited)
+      debug("The Spec is %s", spec)
+      recipe = getRecipeFromDir(recipe, filename or spec["package"], specDir, recipe_visited)
+      debug("The Recipe is %s", recipe)
+      exit (1)
     validateSpec(spec)
-    if "inherits_body" in spec:
-      recipeDir=os.path.join(os.environ.get("BITS_REPO_DIR", ""), spec["inherits_body"])
-      recipe = getRecipeFromDir(filename or spec["package"], recipeDir)
   except RuntimeError as e:
     err = str(e)
   except IOError as e:
@@ -736,7 +742,7 @@ def getGeneratedPackages(configDir):
       x=sys.path.pop(0)
   return pkgs
 
-def getSpecFromDir(override_spec, pkg, configDir, visited=None):
+def getSpecFromDir(override_spec, pkg, configDir, visited):
     if visited is None:
         visited = set()
     if len(visited) >= len(getConfigPaths(os.environ.get("BITS_REPO_DIR"))):
@@ -755,7 +761,26 @@ def getSpecFromDir(override_spec, pkg, configDir, visited=None):
         final_base = getSpecFromDir(spec, pkg, new_config_dir, visited)
         return handleMergePolicy(override_spec, final_base)
     return handleMergePolicy(override_spec, spec)
-    
+
+def getRecipeFromDir(existing_recipe, pkg, configDir, visited=None):
+      if visited is None:
+          visited = set()
+      if len(visited) >= len(getConfigPaths(os.environ.get("BITS_REPO_DIR"))):
+        raise RuntimeError("Circular dependency detected")
+      genPackages = getGeneratedPackages(configDir)
+      filename, pkgdir = resolveFilename({}, pkg, configDir, genPackages)
+      if pkgdir in visited:
+        raise RuntimeError("Circular dependency detected")
+      visited.add(pkgdir)
+      reader = getRecipeReader(filename, configDir, genPackages)
+      d = reader()
+      header, recipe = d.split("---", 1)
+      spec = yamlLoad(header)
+      if "from" in spec:
+          new_config_dir = os.path.join(os.path.dirname(configDir), spec["from"])
+          return getRecipeFromDir(recipe, pkg, new_config_dir, visited)
+      return existing_recipe + recipe
+
 def handleMergePolicy(override_spec, final_base):
     mergePolicy = override_spec.get("merge_policy", {})
     remove_keys = mergePolicy.get("remove", [])
@@ -792,25 +817,6 @@ def handleMergePolicy(override_spec, final_base):
     for k, v in override_spec.items():
             final_base[k] = override_spec[k]
     return final_base
-
-def getRecipeFromDir(pkg, configDir, visited=None):
-      if visited is None:
-          visited = set()
-      if len(visited) >= len(getConfigPaths(os.environ.get("BITS_REPO_DIR"))):
-        raise RuntimeError("Circular dependency detected")
-      genPackages = getGeneratedPackages(configDir)
-      filename, pkgdir = resolveFilename({}, pkg, configDir, genPackages)
-      if pkgdir in visited:
-        raise RuntimeError("Circular dependency detected")
-      visited.add(pkgdir)
-      reader = getRecipeReader(filename, configDir, genPackages)
-      d = reader()
-      header, recipe = d.split("---", 1)
-      spec = yamlLoad(header)
-      if "inherits_body" in spec:
-          new_config_dir = os.path.join(os.path.dirname(configDir), spec["inherits_body"])
-          return getRecipeFromDir(pkg, new_config_dir, visited)
-      return recipe
 
 
 class Hasher:
