@@ -423,23 +423,18 @@ def parseRecipe(reader):
   assert(reader.__call__)
   basename = os.path.basename(getattr(reader, "url", "") or "")
   filename = basename[:-3] if basename.endswith(".sh") else basename
-  debug("Parsing recipe %s", reader.url)
-  debug("Filename is %s", filename)
-  debug("Basename is %s", basename)
   err, spec, recipe = (None, None, None)
   try:
     d = reader()
     header,recipe = d.split("---", 1)
     spec = yamlLoad(header)
     if "from" in spec:
-      spec_visited = set()
-      recipe_visited = set()
+      visited = set()
       repoDir = os.environ.get("BITS_REPO_DIR")
       dir = os.path.join(repoDir, spec["from"])
-      spec = getSpecFromDir(spec, filename or spec["package"], dir, spec_visited)
-      debug("The Spec is %s", spec)
-      recipe = getRecipeFromDir(recipe, filename or spec["package"], dir, recipe_visited)
-      debug("The Recipe is %s", recipe)
+      spec, recipe = getSpecFromDir(spec, recipe, filename or spec["package"], dir, visited)
+    if "from" in spec:
+      parseRecipe(getRecipeReader(filename or spec["package"], os.path.join(repoDir, spec["from"]), getGeneratedPackages(os.path.join(repoDir, spec["from"]))))
     validateSpec(spec)
   except RuntimeError as e:
     err = str(e)
@@ -751,35 +746,12 @@ def getSpecFromDir(override_spec, pkg, configDir, spec_visited):
     filename, pkgdir = resolveFilename({}, pkg, configDir, genPackages)
     if pkgdir in spec_visited:
         raise RuntimeError("Circular dependency detected")
-    spec_visited.add(pkgdir)
+    visited.add(pkgdir)
     reader = getRecipeReader(filename, configDir, genPackages)
     d = reader()
     header, recipe = d.split("---", 1)
     spec = yamlLoad(header)
-    if "from" in spec:
-        new_config_dir = os.path.join(os.path.dirname(configDir), spec["from"])
-        final_base = getSpecFromDir(spec, pkg, new_config_dir, spec_visited)
-        return handleMergePolicy(override_spec, final_base)
-    return handleMergePolicy(override_spec, spec)
-
-def getRecipeFromDir(existing_recipe, pkg, configDir, recipe_visited):
-      if recipe_visited is None:
-          recipe_visited = set()
-      if len(recipe_visited) >= len(getConfigPaths(os.environ.get("BITS_REPO_DIR"))):
-        raise RuntimeError("Circular dependency detected")
-      genPackages = getGeneratedPackages(configDir)
-      filename, pkgdir = resolveFilename({}, pkg, configDir, genPackages)
-      if pkgdir in recipe_visited:
-        raise RuntimeError("Circular dependency detected")
-      recipe_visited.add(pkgdir)
-      reader = getRecipeReader(filename, configDir, genPackages)
-      d = reader()
-      header, recipe = d.split("---", 1)
-      spec = yamlLoad(header)
-      if "from" in spec:
-          new_config_dir = os.path.join(os.path.dirname(configDir), spec["from"])
-          return getRecipeFromDir(recipe, pkg, new_config_dir, recipe_visited)
-      return existing_recipe + recipe
+    return handleMergePolicy(override_spec, spec), override_recipe + recipe
 
 def handleMergePolicy(override_spec, final_base):
     mergePolicy = override_spec.get("merge_policy", {})
