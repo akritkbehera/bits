@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import pprint
 import yaml
 from os.path import exists
 import hashlib
@@ -737,16 +738,14 @@ def getGeneratedPackages(configDir):
       x=sys.path.pop(0)
   return pkgs
 
-def getSpecFromDir(override_spec, pkg, configDir, spec_visited):
-    if spec_visited is None:
-        spec_visited = set()
-    if len(spec_visited) >= len(getConfigPaths(os.environ.get("BITS_REPO_DIR"))):
+def getSpecFromDir(override_spec, override_recipe, pkg, configDir, visited):
+    if len(visited) >= len(getConfigPaths(os.environ.get("BITS_REPO_DIR"))):
       raise RuntimeError("Circular dependency detected")
     genPackages = getGeneratedPackages(configDir)
+    debug("The generated packages are %s", pprint.pprint(genPackages))
     filename, pkgdir = resolveFilename({}, pkg, configDir, genPackages)
-    if pkgdir in spec_visited:
+    if pkgdir in visited:
         raise RuntimeError("Circular dependency detected")
-    visited.add(pkgdir)
     reader = getRecipeReader(filename, configDir, genPackages)
     d = reader()
     header, recipe = d.split("---", 1)

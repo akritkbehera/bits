@@ -265,7 +265,7 @@ def downloadPip(source, dest, work_dir):
         url=None
         if "releases" in data and pack.split('=')[2] in data["releases"]:
             for file in data["releases"][pack.split('=')[2]]:
-                if file["packagetype"] == "sdist":
+                if file["packagetype"] == "sdist":  
                     url=file["url"]
         if url is not None:
             debug("Found source on pypi - downloading")
