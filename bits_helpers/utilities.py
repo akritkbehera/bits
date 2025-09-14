@@ -423,7 +423,7 @@ def yamlDump(s):
   YamlOrderedDumper.add_representer(OrderedDict, represent_ordereddict)
   return yaml.dump(s, Dumper=YamlOrderedDumper)
 
-def parseRecipe(reader, generatePackages=None):
+def parseRecipe(reader, generatePackages=None, visited=None):
   assert(reader.__call__)
   basename = os.path.basename(getattr(reader, "url", "") or "")
   filename = basename[:-3] if basename.endswith(".sh") else basename
@@ -432,14 +432,16 @@ def parseRecipe(reader, generatePackages=None):
     d = reader()
     header,recipe = d.split("---", 1)
     spec = yamlLoad(header)
-    if "from" in spec:
-      visited = set()
+    while "from" in spec:
+      if visited is None:
+        visited = set()
       repoDir = os.environ.get("BITS_REPO_DIR")
-      dir = os.path.join(repoDir, spec["from"])
-      spec, recipe = getSpecFromDir(spec, recipe, filename or spec["package"], dir, visited, generatePackages)
+      if spec["from"] in visited:
+          raise RuntimeError(f"Cycle detected in 'from' chain at '{spec['from']}'")
+      visited.add(spec["from"])
+      parent_dir = os.path.join(repoDir, spec["from"])
+      spec, recipe = getSpecFromDir(spec, recipe, filename or spec.get("package", ""), parent_dir, visited, generatePackages)
       debug("The recipe is as follows %s", spec)
-    if "from" in spec:
-        err, spec, recipe = parseRecipe(getRecipeReader(filename or spec["package"], os.path.join(repoDir, spec["from"]), generatePackages))
     validateSpec(spec)
   except RuntimeError as e:
     err = str(e)
