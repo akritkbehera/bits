@@ -16,7 +16,7 @@ from shlex import quote
 from bits_helpers.cmd import getoutput
 from bits_helpers.git import git
 
-from bits_helpers.log import error, warning, dieOnError
+from bits_helpers.log import error, warning, dieOnError, debug
 
 class SpecError(Exception):
   pass
@@ -356,15 +356,19 @@ def readDefaults(configDir, defaults, error, architecture):
     defaultsBody += "\n# Architecture defaults\n" + archBody
   return (defaultsMeta, defaultsBody)
 
-
-def getRecipeReader(url:str , dist=None, genPackages={}):
-  m = re.search(r'^(dist|generate):(.*)@([^@]+)$', url)
-  if m and m.group(1) == "generate":
-    return GeneratedPackage(genPackages[m.group(2)]["command"])
-  elif m and dist:
-    return GitReader(url, dist)
-  else:
-    return FileReader(url)
+def getRecipeReader(url: str, dist=None, genPackages={}):
+    m = re.search(r'^(dist|generate):(.*)@([^@]+)$', url)
+    if m and m.group(1) == "generate":
+        pkg, version = m.group(2), m.group(3)
+        # search across all generated dirs
+        for d, pkgs in genPackages.items():
+            if pkg in pkgs and pkgs[pkg]["version"] == version:
+                return GeneratedPackage(pkgs[pkg]["command"])
+        raise ValueError(f"Generated package {pkg}@{version} not found")
+    elif m and dist:
+        return GitReader(url, dist)
+    else:
+        return FileReader(url)
 
 # Generate a recipe of package
 class GeneratedPackage(object):
@@ -419,13 +423,23 @@ def yamlDump(s):
   YamlOrderedDumper.add_representer(OrderedDict, represent_ordereddict)
   return yaml.dump(s, Dumper=YamlOrderedDumper)
 
-def parseRecipe(reader):
+def parseRecipe(reader, generatePackages=None):
   assert(reader.__call__)
+  basename = os.path.basename(getattr(reader, "url", "") or "")
+  filename = basename[:-3] if basename.endswith(".sh") else basename
   err, spec, recipe = (None, None, None)
   try:
     d = reader()
     header,recipe = d.split("---", 1)
     spec = yamlLoad(header)
+    if "from" in spec:
+      visited = set()
+      repoDir = os.environ.get("BITS_REPO_DIR")
+      dir = os.path.join(repoDir, spec["from"])
+      spec, recipe = getSpecFromDir(spec, recipe, filename or spec["package"], dir, visited, generatePackages)
+      debug("The recipe is as follows %s", spec)
+    if "from" in spec:
+        err, spec, recipe = parseRecipe(getRecipeReader(filename or spec["package"], os.path.join(repoDir, spec["from"]), generatePackages))
     validateSpec(spec)
   except RuntimeError as e:
     err = str(e)
@@ -440,6 +454,18 @@ def parseRecipe(reader):
   except ValueError:
     err = "Unable to parse %s. Header missing." % reader.url
   return err, spec, recipe
+
+def getSpecFromDir(override_spec, override_recipe, pkg, configDir, visited, genPackages):
+    if len(visited) >= len(getConfigPaths(os.environ.get("BITS_REPO_DIR"))):
+      raise RuntimeError("Circular dependency detected")
+    filename, pkgdir = resolveFilename({}, pkg, configDir, genPackages, os.path.join(configDir, override_spec["from"]))
+    if pkgdir in visited:
+        raise RuntimeError("Circular dependency detected")
+    reader = getRecipeReader(filename, configDir, genPackages)
+    d = reader()
+    header, recipe = d.split("---", 1)
+    spec = yamlLoad(header)
+    return handleMergePolicy(override_spec, spec), override_recipe + recipe
 
 # (Almost pure part of the defaults parsing)
 # Override defaultsGetter for unit tests.
@@ -477,6 +503,8 @@ def checkForFilename(taps, pkg, d):
 
 def getConfigPaths(configDir):
   configPath = os.environ.get("BITS_PATH")
+  debug("configDir is of type %s", type(configDir))
+  debug("The BITS_PATH is %s", configPath)
   pkgDirs = [configDir]
 
   if configPath:
@@ -485,16 +513,24 @@ def getConfigPaths(configDir):
          pkgDirs.append(d)
   return pkgDirs
 
-def resolveFilename(taps, pkg, configDir, genPackages):
-  if pkg in genPackages:
-    return ("generate:%s@%s" % (pkg, genPackages[pkg]["version"]), genPackages[pkg]["pkgdir"])
+def resolveFilename(taps, pkg, configDir, genPackages, genDir=None):
+    search_dirs = []
+    if genDir is not None:
+        search_dirs.append(genDir)
+    for d in getConfigPaths(configDir):
+        if d not in search_dirs:
+            search_dirs.append(d)
 
-  for d in getConfigPaths(configDir):
-    filename = checkForFilename(taps,pkg,d)
-    if exists(filename):
-      return(filename,os.path.abspath(d))
+    for d in search_dirs:
+        if genPackages is not None and d in genPackages and pkg in genPackages[d]:
+            meta = genPackages[d][pkg]
+            return ("generate:%s@%s" % (pkg, meta["version"]), meta["pkgdir"])
 
-  dieOnError(True, "Package %s not found in %s" % (pkg, configDir))
+        filename = checkForFilename(taps, pkg, d)
+        if exists(filename):
+            return (filename, os.path.abspath(d))
+
+    return None
     
 def resolveDefaultsFilename(defaults, configDir):
   configPath = os.environ.get("BITS_PATH")
@@ -551,7 +587,7 @@ def getPackageList(packages, specs, configDir, preferSystem, noSystem,
     dieOnError(not filename, "Package %s not found in %s" % (p, configDir))
     assert(filename is not None)
 
-    err, spec, recipe = parseRecipe(getRecipeReader(filename, configDir, generatedPackages))
+    err, spec, recipe = parseRecipe(getRecipeReader(filename, configDir, generatedPackages), generatedPackages)
     dieOnError(err, err)
     # Unless there was an error, both spec and recipe should be valid.
     # otherwise the error should have been caught above.
@@ -717,16 +753,62 @@ def getPackageList(packages, specs, configDir, preferSystem, noSystem,
   return (systemPackages, ownPackages, failedRequirements, validDefaults)
 
 def getGeneratedPackages(configDir):
-  pkgs = {}
-  pkgDirs = getConfigPaths(configDir)
-  for pkgdir in pkgDirs:
-    for vp in [x.split(os.sep)[-2] for x in  glob(join(pkgdir,"*","packages.py"))]:
-      sys.path.insert(0,join(pkgdir, vp))
-      pkg = __import__("packages")
-      pkg.getPackages(pkgs, pkgdir)
-      sys.modules.pop('packages')
-      x=sys.path.pop(0)
-  return pkgs
+    print("The configDir is %s", configDir)
+    all_pkgs = {}
+    pkgDirs = getConfigPaths(configDir)
+    print("The pkgDirs are: %s", pkgDirs)
+
+    for pkgdir in pkgDirs:
+        dir_pkgs = {}
+        for vp in [x.split(os.sep)[-2] for x in glob(join(pkgdir, "*", "packages.py"))]:
+            sys.path.insert(0, join(pkgdir, vp))
+            pkg = __import__("packages")
+            pkg.getPackages(dir_pkgs, pkgdir)
+            sys.modules.pop("packages")
+            sys.path.pop(0)
+
+        if dir_pkgs:
+            all_pkgs[pkgdir] = dir_pkgs
+
+    print("The generated packages are as follows: %s", all_pkgs)
+    return all_pkgs
+
+def handleMergePolicy(override_spec, final_base):
+    mergePolicy = override_spec.get("merge_policy", {})
+    remove_keys = mergePolicy.get("remove", [])
+    force_inherit = mergePolicy.get("inherit", [])
+    if isinstance(remove_keys, str):
+        remove_keys = remove_keys.replace(" ", "").split(",")
+    for k in remove_keys:
+        if k in final_base:
+            final_base.pop(k, None)
+    if isinstance(force_inherit, str):
+        force_inherit = force_inherit.replace(" ", "").split(",")
+    for key in force_inherit:
+        if key in final_base:
+            override_spec[key] = final_base[key]
+    merge_keys = mergePolicy.get("merge", [])
+    if isinstance(merge_keys, str):
+        merge_keys = merge_keys.replace(" ", "").split(",")
+    override_spec.pop("merge_policy", None)
+    override_spec.pop("from", None)
+
+    for key in merge_keys:
+        if key not in override_spec:
+            continue
+        if key not in final_base:
+            final_base[key] = override_spec[key]
+        else:
+            if isinstance(final_base[key], OrderedDict) and isinstance(override_spec[key], OrderedDict):
+                merged = final_base[key].copy()
+                merged.update(override_spec[key])
+                final_base[key] = merged
+            else:
+                raise ValueError(f"Merge key not allowed for {key} as it's of type {type(final_base.get(key, 'unknown'))}")
+        override_spec.pop(key)
+    for k, v in override_spec.items():
+            final_base[k] = override_spec[k]
+    return final_base
 
 class Hasher:
   def __init__(self) -> None:
@@ -741,3 +823,4 @@ class Hasher:
     new_hasher = Hasher()
     new_hasher.h = self.h.copy()
     return new_hasher
+
