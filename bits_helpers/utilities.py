@@ -357,17 +357,17 @@ def readDefaults(configDir, defaults, error, architecture):
   return (defaultsMeta, defaultsBody)
 
 def getRecipeReader(url: str, dist=None, genPackages={}):
-    m = re.search(r'^(dist|generate):(.*)@([^@]+)$', url)
-    if m and m.group(1) == "generate":
-        pkg, version = m.group(2), m.group(3)
-        # search across all generated dirs
-        if pkg in genPackages and genPackages[pkg]["version"] == version:
-            return GeneratedPackage(genPackages[pkg])
-        raise ValueError(f"Generated package {pkg}@{version} not found")
-    elif m and dist:
-        return GitReader(url, dist)
-    else:
-        return FileReader(url)
+  m = re.search(r'^(dist|generate):(.*)@([^@]+)$', url)
+  if m and m.group(1) == "generate":
+    pkg, version = m.group(2), m.group(3)
+    # search across all generated dirs
+    if pkg in genPackages and genPackages[pkg]["version"] == version:
+      return GeneratedPackage(genPackages[pkg])
+    raise ValueError(f"Generated package {pkg}@{version} not found")
+  elif m and dist:
+      return GitReader(url, dist)
+  else:
+      return FileReader(url)
 
 # Generate a recipe of package
 class GeneratedPackage(object):
@@ -424,43 +424,43 @@ def yamlDump(s):
   return yaml.dump(s, Dumper=YamlOrderedDumper)
 
 def parseRecipe(reader, generatePackages=None, visited=None):
-    assert(reader.__call__)
-    err, spec, recipe = (None, None, None)
-    try:
-        d = reader()
-        header,recipe = d.split("---", 1)
-        spec = yamlLoad(header)
-        if "from" in spec:
-            basename = os.path.basename(getattr(reader, "url", "") or "")
-            filename = basename[:-3] if basename.endswith(".sh") else basename
-            if visited is None:
-                visited = []
-            repoDir = os.path.abspath(os.environ.get("BITS_REPO_DIR"))
-            if spec["from"] in visited:
-                raise RuntimeError(f" Cyclic Dependency: {' -> '.join(list(visited) + [spec['from']])}")
-            visited.append(spec["from"])
-            parent_dir = os.path.join(repoDir, spec["from"])
-            base_filename, pkgdir = resolveFilename({}, filename, parent_dir, generatePackages)
-            base_reader = getRecipeReader(base_filename, repoDir, generatePackages[parent_dir])
-            err, base_spec, base_recipe = parseRecipe(base_reader, generatePackages, visited)
-            spec, recipe_append = handleMergePolicy(spec, base_spec)
-            recipe = recipe + base_recipe if recipe_append else recipe
-        validateSpec(spec)
-    except RuntimeError as e:
-        error(f"RuntimeError in: {e}")
-    except IOError as e:
-        error(f"IOError in: {e}")
-    except SpecError as e:
-        error(f"Malformed header for {reader.url}\n{e}")
-    except yaml.scanner.ScannerError as e:
-        error(f"YAML ScannerError: {reader.url}\n{e}")
-    except yaml.parser.ParserError as e:
-        error(f"YAML ParserError: {reader.url}\n{e}")
-    except ValueError as e:
-        error(f"ValueError: {reader.url}\n{e}")
-    except Exception as e:
-        error(f"Unknown Exception in parseRecipe: {reader.url}\n{e}")
-    return err, spec, recipe
+  assert(reader.__call__)
+  err, spec, recipe = (None, None, None)
+  try:
+    d = reader()
+    header,recipe = d.split("---", 1)
+    spec = yamlLoad(header)
+    if "from" in spec:
+      basename = os.path.basename(getattr(reader, "url", "") or "")
+      filename = basename[:-3] if basename.endswith(".sh") else basename
+      if visited is None:
+        visited = []
+        repoDir = os.path.abspath(os.environ.get("BITS_REPO_DIR"))
+        if spec["from"] in visited:
+          raise RuntimeError(f" Cyclic Dependency: {' -> '.join(list(visited) + [spec['from']])}")
+        visited.append(spec["from"])
+        parent_dir = os.path.join(repoDir, spec["from"])
+        base_filename, pkgdir = resolveFilename({}, filename, parent_dir, generatePackages)
+        base_reader = getRecipeReader(base_filename, repoDir, generatePackages[parent_dir])
+        err, base_spec, base_recipe = parseRecipe(base_reader, generatePackages, visited)
+        spec, recipe_append = handleMergePolicy(spec, base_spec)
+        recipe = recipe + base_recipe if recipe_append else recipe
+    validateSpec(spec)
+  except RuntimeError as e:
+    error(f"RuntimeError in: {e}")
+  except IOError as e:
+    error(f"IOError in: {e}")
+  except SpecError as e:
+    error(f"Malformed header for {reader.url}\n{e}")
+  except yaml.scanner.ScannerError as e:
+    error(f"YAML ScannerError: {reader.url}\n{e}")
+  except yaml.parser.ParserError as e:
+    error(f"YAML ParserError: {reader.url}\n{e}")
+  except ValueError as e:
+    error(f"ValueError: {reader.url}\n{e}")
+  except Exception as e:
+    error(f"Unknown Exception in parseRecipe: {reader.url}\n{e}")
+  return err, spec, recipe
 
 def parseDefaults(disable, defaultsGetter, log):
   defaultsMeta, defaultsBody = defaultsGetter()
@@ -505,20 +505,18 @@ def getConfigPaths(configDir):
     return pkgDirs
 
 def resolveFilename(taps, pkg, configDir, generatedPackages):
-    search_dirs = []
-    for d in getConfigPaths(configDir):
-        if d not in search_dirs:
-            search_dirs.append(d)
-
-    for d in search_dirs:
-        if d in generatedPackages and pkg in generatedPackages[d]:
-            meta = generatedPackages[d][pkg]
-            return ("generate:%s@%s" % (pkg, meta["version"]), meta["pkgdir"])
-
-        filename = checkForFilename(taps, pkg, d)
-        if exists(filename):
-            return (filename, os.path.abspath(d))
-    dieOnError(True, "Package %s not found in %s" % (pkg, configDir))
+  search_dirs = []
+  for d in getConfigPaths(configDir):
+    if d not in search_dirs:
+      search_dirs.append(d)
+  for d in search_dirs:
+    if d in generatedPackages and pkg in generatedPackages[d]:
+      meta = generatedPackages[d][pkg]
+      return ("generate:%s@%s" % (pkg, meta["version"]), meta["pkgdir"])
+    filename = checkForFilename(taps, pkg, d)
+    if exists(filename):
+      return (filename, os.path.abspath(d))
+  dieOnError(True, "Package %s not found in %s" % (pkg, configDir))
 
 def resolveDefaultsFilename(defaults, configDir):
   configPath = os.environ.get("BITS_PATH")
@@ -741,66 +739,66 @@ def getPackageList(packages, specs, configDir, preferSystem, noSystem,
   return (systemPackages, ownPackages, failedRequirements, validDefaults)
 
 def getGeneratedPackages(configDir):
-    all_pkgs = {}
-    pkgDirs = getConfigPaths(configDir)
-    for pkgdir in pkgDirs:
-        dir_pkgs = {}
-        for vp in [x.split(os.sep)[-2] for x in glob(join(pkgdir, "*", "packages.py"))]:
-            sys.path.insert(0, join(pkgdir, vp))
-            pkg = __import__("packages")
-            pkg.getPackages(dir_pkgs, pkgdir)
-            sys.modules.pop("packages")
-            sys.path.pop(0)
-        all_pkgs[pkgdir] = dir_pkgs
-    return all_pkgs
+  all_pkgs = {}
+  pkgDirs = getConfigPaths(configDir)
+  for pkgdir in pkgDirs:
+    dir_pkgs = {}
+    for vp in [x.split(os.sep)[-2] for x in glob(join(pkgdir, "*", "packages.py"))]:
+        sys.path.insert(0, join(pkgdir, vp))
+        pkg = __import__("packages")
+        pkg.getPackages(dir_pkgs, pkgdir)
+        sys.modules.pop("packages")
+        sys.path.pop(0)
+    all_pkgs[pkgdir] = dir_pkgs
+  return all_pkgs
 
 
 def handleMergePolicy(override_spec, final_base):
-    mergePolicy = override_spec.get("merge_policy", {})
-    remove_keys = mergePolicy.get("remove", [])
-    force_inherit = mergePolicy.get("inherit", [])
-    if isinstance(remove_keys, str):
-        remove_keys = remove_keys.replace(" ", "").split(",")
-    recipe_append = "recipe" not in remove_keys
-    for k in remove_keys:
-        if k in final_base:
-            final_base.pop(k, None)
-    if isinstance(force_inherit, str):
-        force_inherit = force_inherit.replace(" ", "").split(",")
-    for key in force_inherit:
-        if key in final_base:
-            override_spec[key] = final_base[key]
-    merge_keys = mergePolicy.get("merge", [])
-    if isinstance(merge_keys, str):
-        merge_keys = merge_keys.replace(" ", "").split(",")
-    override_spec.pop("merge_policy", None)
-    override_spec.pop("from", None)
-    for key in merge_keys:
-        if key not in override_spec:
-            raise ValueError(f"Merge key {key} not found in override spec")
-        if key not in final_base:
-            final_base[key] = override_spec[key]
-        else:
-            if isinstance(final_base[key], OrderedDict) and isinstance(
-                override_spec[key], OrderedDict
-            ):
-                merged = final_base[key].copy()
-                merged.update(override_spec[key])
-                final_base[key] = merged
-            elif isinstance(final_base[key], list) and isinstance(
-                override_spec[key], list
-            ):
-                for x in override_spec[key]:
-                    if x not in final_base[key]:
-                        final_base[key].append(x)
-            else:
-                raise ValueError(
-                    f"Merge key not allowed for {key} as it's of type {type(final_base.get(key, 'unknown'))}"
-                )
-        override_spec.pop(key)
-    for k, v in override_spec.items():
-        final_base[k] = override_spec[k]
-    return final_base, recipe_append
+  mergePolicy = override_spec.get("merge_policy", {})
+  remove_keys = mergePolicy.get("remove", [])
+  force_inherit = mergePolicy.get("inherit", [])
+  if isinstance(remove_keys, str):
+    remove_keys = remove_keys.replace(" ", "").split(",")
+  recipe_append = "recipe" not in remove_keys
+  for k in remove_keys:
+    if k in final_base:
+      final_base.pop(k, None)
+  if isinstance(force_inherit, str):
+    force_inherit = force_inherit.replace(" ", "").split(",")
+  for key in force_inherit:
+    if key in final_base:
+      override_spec[key] = final_base[key]
+  merge_keys = mergePolicy.get("merge", [])
+  if isinstance(merge_keys, str):
+    merge_keys = merge_keys.replace(" ", "").split(",")
+  override_spec.pop("merge_policy", None)
+  override_spec.pop("from", None)
+  for key in merge_keys:
+    if key not in override_spec:
+      raise ValueError(f"Merge key {key} not found in override spec")
+    if key not in final_base:
+      final_base[key] = override_spec[key]
+    else:
+      if isinstance(final_base[key], OrderedDict) and isinstance(
+          override_spec[key], OrderedDict
+      ):
+          merged = final_base[key].copy()
+          merged.update(override_spec[key])
+          final_base[key] = merged
+      elif isinstance(final_base[key], list) and isinstance(
+          override_spec[key], list
+      ):
+          for x in override_spec[key]:
+              if x not in final_base[key]:
+                  final_base[key].append(x)
+      else:
+          raise ValueError(
+              f"Merge key not allowed for {key} as it's of type {type(final_base.get(key, 'unknown'))}"
+            )
+    override_spec.pop(key)
+  for k, v in override_spec.items():
+    final_base[k] = override_spec[k]
+  return final_base, recipe_append
 
 class Hasher:
   def __init__(self) -> None:
