@@ -425,20 +425,20 @@ def yamlDump(s):
 
 def parseRecipe(reader, generatePackages=None, visited=None):
     assert(reader.__call__)
-    basename = os.path.basename(getattr(reader, "url", "") or "")
-    filename = basename[:-3] if basename.endswith(".sh") else basename
     err, spec, recipe = (None, None, None)
     try:
         d = reader()
         header,recipe = d.split("---", 1)
         spec = yamlLoad(header)
         if "from" in spec:
+            basename = os.path.basename(getattr(reader, "url", "") or "")
+            filename = basename[:-3] if basename.endswith(".sh") else basename
             if visited is None:
-                visited = set()
+                visited = []
             repoDir = os.path.abspath(os.environ.get("BITS_REPO_DIR"))
             if spec["from"] in visited:
-                raise RuntimeError(f"🔄 Cyclic Dependency: {' -> '.join(list(visited) + [spec['from']])}")
-            visited.add(spec["from"])
+                raise RuntimeError(f" Cyclic Dependency: {' -> '.join(list(visited) + [spec['from']])}")
+            visited.append(spec["from"])
             parent_dir = os.path.join(repoDir, spec["from"])
             base_filename, pkgdir = resolveFilename({}, filename, parent_dir, generatePackages)
             base_reader = getRecipeReader(base_filename, repoDir, generatePackages[parent_dir])
@@ -447,19 +447,19 @@ def parseRecipe(reader, generatePackages=None, visited=None):
             recipe = recipe + base_recipe if recipe_append else recipe
         validateSpec(spec)
     except RuntimeError as e:
-        err = str(e)
+        error(f"RuntimeError in: {e}")
     except IOError as e:
-        err = str(e)
+        error(f"IOError in: {e}")
     except SpecError as e:
-        err = "Malformed header for %s\n%s" % (reader.url, str(e))
+        error(f"Malformed header for {reader.url}\n{e}")
     except yaml.scanner.ScannerError as e:
-        err = "Unable to parse %s\n%s" % (reader.url, str(e))
+        error(f"YAML ScannerError: {reader.url}\n{e}")
     except yaml.parser.ParserError as e:
-        err = "Unable to parse %s\n%s" % (reader.url, str(e))
+        error(f"YAML ParserError: {reader.url}\n{e}")
     except ValueError as e:
-       err = "Unable to parse %s\n%s" % (reader.url, str(e))
+        error(f"ValueError: {reader.url}\n{e}")
     except Exception as e:
-        err = "Unable to parse %s\n%s" % (reader.url, str(e))
+        error(f"Unknown Exception in parseRecipe: {reader.url}\n{e}")
     return err, spec, recipe
 
 def parseDefaults(disable, defaultsGetter, log):
@@ -511,14 +511,14 @@ def resolveFilename(taps, pkg, configDir, generatedPackages):
             search_dirs.append(d)
 
     for d in search_dirs:
-        if generatedPackages is not None and d in generatedPackages and pkg in generatedPackages[d]:
+        if d in generatedPackages and pkg in generatedPackages[d]:
             meta = generatedPackages[d][pkg]
             return ("generate:%s@%s" % (pkg, meta["version"]), meta["pkgdir"])
 
         filename = checkForFilename(taps, pkg, d)
         if exists(filename):
             return (filename, os.path.abspath(d))
-    return None, None
+    dieOnError(True, "Package %s not found in %s" % (pkg, configDir))
 
 def resolveDefaultsFilename(defaults, configDir):
   configPath = os.environ.get("BITS_PATH")
