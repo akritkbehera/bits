@@ -365,9 +365,9 @@ def getRecipeReader(url: str, dist=None, genPackages={}):
       return GeneratedPackage(genPackages[pkg])
     raise ValueError(f"Generated package {pkg}@{version} not found")
   elif m and dist:
-      return GitReader(url, dist)
+    return GitReader(url, dist)
   else:
-      return FileReader(url)
+    return FileReader(url)
 
 # Generate a recipe of package
 class GeneratedPackage(object):
@@ -433,19 +433,19 @@ def parseRecipe(reader, generatePackages=None, visited=None):
     if "from" in spec:
       basename = os.path.basename(getattr(reader, "url", "") or "")
       filename = basename[:-3] if basename.endswith(".sh") else basename
+      repoDir = os.path.abspath(os.environ.get("BITS_REPO_DIR"))
       if visited is None:
         visited = []
-        repoDir = os.path.abspath(os.environ.get("BITS_REPO_DIR"))
-        if spec["from"] in visited:
-          raise RuntimeError(f" Cyclic Dependency: {' -> '.join(list(visited) + [spec['from']])}")
-        visited.append(spec["from"])
-        parent_dir = os.path.join(repoDir, spec["from"])
-        base_filename, pkgdir = resolveFilename({}, filename, parent_dir, generatePackages)
-        base_reader = getRecipeReader(base_filename, repoDir, generatePackages[parent_dir])
-        err, base_spec, base_recipe = parseRecipe(base_reader, generatePackages, visited)
-        spec, recipe_append = handleMergePolicy(spec, base_spec)
-        recipe = recipe + base_recipe if recipe_append else recipe
-    validateSpec(spec)
+      if spec["from"] in visited:
+        raise RuntimeError(f" Cyclic Dependency: {' -> '.join(list(visited) + [spec['from']])}")
+      visited.append(spec["from"])
+      parent_dir = os.path.join(repoDir, spec["from"])
+      base_filename, pkgdir = resolveFilename({}, filename, parent_dir, generatePackages)
+      base_reader = getRecipeReader(base_filename, repoDir, generatePackages[parent_dir])
+      err, base_spec, base_recipe = parseRecipe(base_reader, generatePackages, visited)
+      spec, recipe_append = handleMergePolicy(spec, base_spec)
+      recipe = recipe + base_recipe if recipe_append else recipe
+    validateSpec(spec)  
   except RuntimeError as e:
     error(f"RuntimeError in: {e}")
   except IOError as e:
@@ -495,14 +495,13 @@ def checkForFilename(taps, pkg, d):
   return filename
 
 def getConfigPaths(configDir):
-    configPath = os.environ.get("BITS_PATH")
-    pkgDirs = [configDir]
-
-    if configPath:
-        for d in [join(configDir, "%s.bits" % r) for r in configPath.split(",") if r]:
-            if exists(d):
-                pkgDirs.append(d)
-    return pkgDirs
+  configPath = os.environ.get("BITS_PATH")
+  pkgDirs = [configDir]
+  if configPath:
+    for d in [join(configDir, "%s.bits" % r) for r in configPath.split(",") if r]:
+      if exists(d):
+        pkgDirs.append(d)
+  return pkgDirs
 
 def resolveFilename(taps, pkg, configDir, generatedPackages):
   search_dirs = []
@@ -525,7 +524,7 @@ def resolveDefaultsFilename(defaults, configDir):
 
   if configPath:
     for d in configPath.split(","):
-       pkgDirs.append(cfgDir + "/" + d + ".bits")
+      pkgDirs.append(cfgDir + "/" + d + ".bits")
 
   for d in pkgDirs:
     filename = "%s/defaults-%s.sh" % (d, defaults)
@@ -744,11 +743,11 @@ def getGeneratedPackages(configDir):
   for pkgdir in pkgDirs:
     dir_pkgs = {}
     for vp in [x.split(os.sep)[-2] for x in glob(join(pkgdir, "*", "packages.py"))]:
-        sys.path.insert(0, join(pkgdir, vp))
-        pkg = __import__("packages")
-        pkg.getPackages(dir_pkgs, pkgdir)
-        sys.modules.pop("packages")
-        sys.path.pop(0)
+      sys.path.insert(0, join(pkgdir, vp))
+      pkg = __import__("packages")
+      pkg.getPackages(dir_pkgs, pkgdir)
+      sys.modules.pop("packages")
+      sys.path.pop(0)
     all_pkgs[pkgdir] = dir_pkgs
   return all_pkgs
 
@@ -780,21 +779,21 @@ def handleMergePolicy(override_spec, final_base):
       final_base[key] = override_spec[key]
     else:
       if isinstance(final_base[key], OrderedDict) and isinstance(
-          override_spec[key], OrderedDict
+        override_spec[key], OrderedDict
       ):
-          merged = final_base[key].copy()
-          merged.update(override_spec[key])
-          final_base[key] = merged
+        merged = final_base[key].copy()
+        merged.update(override_spec[key])
+        final_base[key] = merged
       elif isinstance(final_base[key], list) and isinstance(
-          override_spec[key], list
+        override_spec[key], list
       ):
-          for x in override_spec[key]:
-              if x not in final_base[key]:
-                  final_base[key].append(x)
+        for x in override_spec[key]:
+          if x not in final_base[key]:
+            final_base[key].append(x)
       else:
-          raise ValueError(
-              f"Merge key not allowed for {key} as it's of type {type(final_base.get(key, 'unknown'))}"
-            )
+        raise ValueError(
+          f"Merge key not allowed for {key} as it's of type {type(final_base.get(key, 'unknown'))}"
+        )
     override_spec.pop(key)
   for k, v in override_spec.items():
     final_base[k] = override_spec[k]
