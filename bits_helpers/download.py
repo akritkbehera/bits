@@ -14,7 +14,6 @@ from time import time
 from types import SimpleNamespace
 from bits_helpers.log import error, warning, debug
 import json
-import json
 
 urlRe = re.compile(r".*:.*/.*")
 urlAuthRe = re.compile(r'^(http(s|)://)([^:]+:[^@]+)@(.+)$')
