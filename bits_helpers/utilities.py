@@ -366,7 +366,7 @@ def readDefaults(configDir, defaults, error, architecture):
     if err:
       error(err)
       sys.exit(1)
-    for x in ["env", "disable", "overrides"]:
+    for x in ["env", "disable", "overrides", "append"]:
       defaultsMeta.setdefault(x, {}).update(archMeta.get(x, {}))
     defaultsBody += "\n# Architecture defaults\n" + archBody
   return (defaultsMeta, defaultsBody)
@@ -460,8 +460,7 @@ def parseRecipe(reader, generatePackages=None, visited=None):
       err, base_spec, base_recipe = parseRecipe(base_reader, generatePackages, visited)
       spec, recipe_append = handleMergePolicy(spec, base_spec)
       recipe = recipe + base_recipe if recipe_append else recipe
-    validateSpec(spec)
-    print(spec)
+    validateSpec(spec)  
   except RuntimeError as e:
     error(f"RuntimeError in: {e}")
   except IOError as e:
@@ -479,27 +478,42 @@ def parseRecipe(reader, generatePackages=None, visited=None):
   return err, spec, recipe
 
 def parseDefaults(disable, defaultsGetter, log):
-  defaultsMeta, defaultsBody = defaultsGetter()
-  # Defaults are actually special packages. They can override metadata
-  # of any other package and they can disable other packages. For
-  # example they could decide to switch from ROOT 5 to ROOT 6 and they
-  # could disable alien for O2. For this reason we need to parse their
-  # metadata early and extract the override and disable data.
-  defaultsDisable = asList(defaultsMeta.get("disable", []))
-  for x in defaultsDisable:
-    log("Package %s has been disabled by current default.", x)
-  disable.extend(defaultsDisable)
-  if type(defaultsMeta.get("overrides", OrderedDict())) != OrderedDict:
-    return ("overrides should be a dictionary", None, None)
-  overrides, taps = OrderedDict(), {}
-  commonEnv = {"env": defaultsMeta["env"]} if "env" in defaultsMeta else {}
-  overrides["defaults-release"] = commonEnv
-  for k, v in defaultsMeta.get("overrides", {}).items():
-    f = k.split("@", 1)[0].lower()
-    if "@" in k:
-      taps[f] = "dist:"+k
-    overrides[f] = dict(**(v or {}))
-  return (None, overrides, taps)
+    defaultsMeta, defaultsBody = defaultsGetter()
+    # Defaults are actually special packages. They can override metadata
+    # of any other package and they can disable other packages. For
+    # example they could decide to switch from ROOT 5 to ROOT 6 and they
+    # could disable alien for O2. For this reason we need to parse their
+    # metadata early and extract the override and disable data.
+    defaultsDisable = asList(defaultsMeta.get("disable", []))
+    for x in defaultsDisable:
+        log("Package %s has been disabled by current default.", x)
+    disable.extend(defaultsDisable)
+    
+    if type(defaultsMeta.get("overrides", OrderedDict())) != OrderedDict:
+        return ("overrides should be a dictionary", None, None, None)
+    
+    if type(defaultsMeta.get("append", OrderedDict())) != OrderedDict:
+        return ("append should be a dictionary", None, None, None)
+    
+    overrides, appends, taps = OrderedDict(), OrderedDict(), {}
+    commonEnv = {"env": defaultsMeta["env"]} if "env" in defaultsMeta else {}
+    overrides["defaults-release"] = commonEnv
+    
+    # Process overrides
+    for k, v in defaultsMeta.get("overrides", {}).items():
+        f = k.split("@", 1)[0].lower()
+        if "@" in k:
+            taps[f] = "dist:"+k
+        overrides[f] = dict(**(v or {}))
+    
+    # Process appends
+    for k, v in defaultsMeta.get("append", {}).items():
+        f = k.split("@", 1)[0].lower()
+        if "@" in k:
+            taps[f] = "dist:"+k
+        appends[f] = dict(**(v or {}))
+    
+    return (None, overrides, taps, appends)
 
 def checkForFilename(taps, pkg, d):
   filename = taps.get(pkg, "%s/%s.sh" % (d, pkg))
@@ -558,7 +572,7 @@ def resolveDefaultsFilename(defaults, configDir):
 
 def getPackageList(packages, specs, configDir, preferSystem, noSystem,
                    architecture, disable, defaults, performPreferCheck, performRequirementCheck,
-                   performValidateDefaults, overrides, taps, log, force_rebuild=()):
+                   performValidateDefaults, overrides, appends, taps, log, force_rebuild=()):
   systemPackages = set()
   ownPackages = set()
   failedRequirements = set()
@@ -624,6 +638,29 @@ def getPackageList(packages, specs, configDir, preferSystem, noSystem,
       log("Overrides for package %s: %s", spec["package"], overrides[override])
       spec.update(overrides.get(override, {}) or {})
 
+    for append in appends:
+        # We downcase the regex in parseDefaults(), so downcase the package name
+        # as well. FIXME: This is probably a bad idea; we should use
+        # re.IGNORECASE instead or just match case-sensitively.
+        if not re.fullmatch(append, p.lower()):
+            continue
+        log("Appends for package %s: %s", spec["package"], appends[append])
+        appendData = appends.get(append, {}) or {}
+        for key, value in appendData.items():
+            if key in spec:
+                if isinstance(spec[key], list) and isinstance(value, list):
+                    spec[key].extend(value)
+                elif isinstance(spec[key], dict) and isinstance(value, dict):
+                    spec[key].update(value)
+                elif isinstance(spec[key], OrderedDict) and isinstance(value, dict):
+                    spec[key].update(value)
+                else:
+                    # For non-appendable types, we could either override or log a warning
+                    log("Warning: Cannot append %s to %s for package %s (incompatible types)", 
+                        key, type(spec[key]).__name__, spec["package"])
+            else:
+                # If key doesn't exist in spec, just set it
+                spec[key] = value
     # If --always-prefer-system is passed or if prefer_system is set to true
     # inside the recipe, use the script specified in the prefer_system_check
     # stanza to see if we can use the system version of the package.

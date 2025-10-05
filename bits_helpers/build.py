@@ -383,7 +383,7 @@ def generate_initdotsh(package, specs, architecture, post_build=False):
 
     # Generate the part which sets the environment variables related to the
     # package itself. This can be variables set via the "env" keyword in the
-    # metadata or paths which get concatenated via the "{append,prepend}_path"
+    # metadata or paths which get concatenated via the "{ppend,prepend}_path"
     # keys. These should only be set once the build has actually completed,
     # since the paths referred to will only exist then.
 
@@ -490,7 +490,7 @@ def doBuild(args, parser):
     branch_stream = ""
 
   defaultsReader = lambda : readDefaults(args.configDir, args.defaults, parser.error, args.architecture)
-  (err, overrides, taps) = parseDefaults(args.disable,
+  (err, overrides, taps, appends) = parseDefaults(args.disable,
                                         defaultsReader, debug)
   dieOnError(err, err)
 
@@ -530,6 +530,7 @@ def doBuild(args, parser):
                      performRequirementCheck = lambda pkg, cmd: getstatusoutput_docker(cmd),
                      performValidateDefaults = lambda spec: validateDefaults(spec, args.defaults),
                      overrides               = overrides,
+                     appends                 = appends,
                      taps                    = taps,
                      log                     = debug)
 
