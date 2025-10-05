@@ -1071,7 +1071,7 @@ def doBuild(args, parser):
 
     makedirs(scriptDir, exist_ok=True)
     writeAll("%s/%s.sh" % (scriptDir, spec["package"]), spec["recipe"])
-    writeAll("%s/%s.rpm.sh" % (scriptDir, spec["package"]), generate_nfpm_script())
+    writeAll("%s/%s.rpm.sh" % (scriptDir, spec["package"]), generate_nfpm_script(spec))
     writeAll("%s/build.sh" % scriptDir, cmd_raw % {
       "provenance": create_provenance_info(spec["package"], specs, args),
       "initdotsh_deps": generate_initdotsh(p, specs, args.architecture, post_build=False),
