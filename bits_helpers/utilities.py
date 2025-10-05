@@ -8,6 +8,7 @@ import sys
 import os
 import re
 import platform
+import subprocess
 
 from datetime import datetime
 from collections import OrderedDict
@@ -176,6 +177,20 @@ def resolve_spec_data(spec, data, defaults, branch_basename="", branch_stream=""
   # then to value of "foo_key" i.e. "bar")
   while re.search("\%\([a-zA-Z][a-zA-Z0-9_]*\)s", data):
     data = data % all_vars
+  if data.startswith("shell(") and data.endswith(")"):
+    cmd = data[len("shell("):-1].strip()
+    try:
+      result = subprocess.run(
+          cmd,
+          shell=True,
+          text=True,
+          capture_output=True,
+          check=True
+      )
+      data = result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+      error("Shell command failed: %s" % e.stderr.strip())
+      return f"ERROR: {e.stderr.strip()}"
   return data
 
 def resolve_version(spec, defaults, branch_basename, branch_stream):
@@ -850,3 +865,66 @@ class Hasher:
     new_hasher = Hasher()
     new_hasher.h = self.h.copy()
     return new_hasher
+
+def generate_nfpm_script(spec: dict) -> str:
+    """Generate a shell script that writes nfpm.yaml and builds an RPM."""
+    pkg = spec.get("package", "unknown")
+    ver = spec.get("version", "0.0.0")
+    src = spec.get("source", "N/A")
+    license_ = spec.get("license", "Proprietary or inherited")
+    summary = spec.get("summary", f"CMS external package for {pkg} {ver}")
+    provides = spec.get("provides", [pkg])
+    requires = [
+        r for r in spec.get("requires", [])
+        if not (r.startswith("defaults") or r == "nfpm")
+    ]
+    build_requires = spec.get("build_requires", [])
+    
+    # YAML data structure with placeholders
+    nfpm_yaml = {
+        "name": pkg,
+        "version": str(ver),
+        "release": "1",
+        "arch": "__ARCH__",
+        "platform": "__PLATFORM__",
+        "license": license_,
+        "vendor": "CMS",
+        "maintainer": "CMS <hn-cms-sw-develtools@cern.ch>",
+        "homepage": src,
+        "description": summary,
+        "provides": provides,
+        "depends": requires,
+        "contents": [
+            {
+                "src": "__INSTALLROOT__/",
+                "dst": "/opt",
+                "file_info": {
+                    "owner": "root",
+                    "group": "root",
+                    "mode": 0o755
+                },
+            }
+        ],
+        "rpm": {
+            "prefixes": ["/opt"],
+            "compression": "zstd"
+        }
+    }
+    yaml_content = yaml.dump(nfpm_yaml, sort_keys=False)
+    
+    # Replace placeholders with shell variables
+    yaml_content = yaml_content.replace("__ARCH__", "$(uname -m)")
+    yaml_content = yaml_content.replace("__INSTALLROOT__", "$INSTALLROOT")
+    yaml_content = yaml_content.replace("__PLATFORM__", "$(uname -s | tr '[:upper:]' '[:lower:]')")
+    
+    # Use double-quoted heredoc to allow expansion
+    return f"""#!/bin/bash
+cat > "$BUILDDIR/nfpm.yaml" <<EOF
+{yaml_content}
+EOF
+echo "[nfpm] Building RPM for {pkg} {ver}"
+if [ -z "${NFPM_ROOT:-}" ]; then
+  NFPM_ROOT=$BITS_WORK_DIR/$ARCHITECTURE/latest/nfpm
+fi
+$NFPM_ROOT/nfpm pkg --packager rpm --config "$BUILDDIR/nfpm.yaml" --target "$INSTALLROOT"
+"""

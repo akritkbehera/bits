@@ -126,6 +126,10 @@ function Run() { # dummy function
     true
 }
 
+if [ -f "$WORK_DIR/SPECS/$ARCHITECTURE/$PKGNAME/$PKGVERSION-$PKGREVISION/$PKGNAME.rpm.sh" ]; then
+  bash -e -x "$WORK_DIR/SPECS/$ARCHITECTURE/$PKGNAME/$PKGVERSION-$PKGREVISION/$PKGNAME.rpm.sh"
+fi
+
 printenv
 
 if [[ "$CACHED_TARBALL" == "" && ! -f $BUILDROOT/log ]]; then
