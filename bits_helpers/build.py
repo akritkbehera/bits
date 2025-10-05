@@ -11,7 +11,7 @@ from bits_helpers.utilities import parseDefaults, readDefaults
 from bits_helpers.utilities import getPackageList, asList
 from bits_helpers.utilities import validateDefaults
 from bits_helpers.utilities import Hasher
-from bits_helpers.utilities import resolve_tag, resolve_version, short_commit_hash, resolve_spec_data
+from bits_helpers.utilities import resolve_tag, resolve_version, short_commit_hash, resolve_spec_data, generate_nfpm_script
 from bits_helpers.git import Git, git
 from bits_helpers.sl import Sapling
 from bits_helpers.scm import SCMError
@@ -1071,6 +1071,7 @@ def doBuild(args, parser):
 
     makedirs(scriptDir, exist_ok=True)
     writeAll("%s/%s.sh" % (scriptDir, spec["package"]), spec["recipe"])
+    writeAll("%s/%s.rpm.sh" % (scriptDir, spec["package"]), generate_nfpm_script())
     writeAll("%s/build.sh" % scriptDir, cmd_raw % {
       "provenance": create_provenance_info(spec["package"], specs, args),
       "initdotsh_deps": generate_initdotsh(p, specs, args.architecture, post_build=False),

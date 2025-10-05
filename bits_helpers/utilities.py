@@ -8,6 +8,7 @@ import sys
 import os
 import re
 import platform
+import subprocess
 
 from datetime import datetime
 from collections import OrderedDict
@@ -459,7 +460,8 @@ def parseRecipe(reader, generatePackages=None, visited=None):
       err, base_spec, base_recipe = parseRecipe(base_reader, generatePackages, visited)
       spec, recipe_append = handleMergePolicy(spec, base_spec)
       recipe = recipe + base_recipe if recipe_append else recipe
-    validateSpec(spec)  
+    validateSpec(spec)
+    print(spec)
   except RuntimeError as e:
     error(f"RuntimeError in: {e}")
   except IOError as e:
@@ -826,3 +828,39 @@ class Hasher:
     new_hasher = Hasher()
     new_hasher.h = self.h.copy()
     return new_hasher
+
+def generate_nfpm_script() -> str:
+    """Return the shell script content for creating nfpm.yaml and packaging RPM."""
+    return """#!/bin/bash
+cat > "$BUILDDIR/nfpm.yaml" <<EOF
+name: ${PKGNAME}
+version: "${PKGVERSION}"
+release: "1"
+arch: $(uname -m)
+platform: linux
+license: "As required by the original provider of the software."
+description: "CMS external package for ${PKGNAME} ${PKGVERSION}"
+vendor: CMS
+maintainer: "CMS <hn-cms-sw-develtools@cern.ch>"
+
+depends:
+$(for pkg in $REQUIRES; do echo "  - ${pkg}"; done)
+
+contents:
+  - src: "$INSTALLROOT/"
+    dst: /opt
+    file_info:
+      owner: root
+      group: root
+      mode: 0755
+
+rpm:
+  prefixes:
+   - /opt
+  compression: zstd
+EOF
+
+echo $NFPM_ROOT
+
+$NFPM_ROOT/nfpm pkg --packager rpm --config "$BUILDDIR/nfpm.yaml" --target "$INSTALLROOT"
+"""
