@@ -460,7 +460,7 @@ def parseRecipe(reader, generatePackages=None, visited=None):
       err, base_spec, base_recipe = parseRecipe(base_reader, generatePackages, visited)
       spec, recipe_append = handleMergePolicy(spec, base_spec)
       recipe = recipe + base_recipe if recipe_append else recipe
-    validateSpec(spec)  
+    validateSpec(spec)
   except RuntimeError as e:
     error(f"RuntimeError in: {e}")
   except IOError as e:
@@ -868,17 +868,19 @@ class Hasher:
 
 def generate_nfpm_script(spec: dict) -> str:
     """Generate a shell script that writes nfpm.yaml and builds an RPM."""
-    pkg = spec.get("package", "unknown")
+    print(spec)
+    pkg = "cms_" + spec.get("package", "unknown")
     ver = spec.get("version", "0.0.0")
     src = spec.get("source", "N/A")
     license_ = spec.get("license", "Proprietary or inherited")
     summary = spec.get("summary", f"CMS external package for {pkg} {ver}")
+    hash_ = spec.get("hash", "")
     provides = spec.get("provides", [pkg])
     requires = [
-        r for r in spec.get("requires", [])
+        "cms_" + r for r in spec.get("full_runtime_requires", [])
         if not (r.startswith("defaults") or r == "nfpm")
     ]
-    build_requires = spec.get("build_requires", [])
+    build_requires = ["cms_" + br for br in spec.get("full_build_requires", [])]
     
     # YAML data structure with placeholders
     nfpm_yaml = {
@@ -923,8 +925,8 @@ cat > "$BUILDDIR/nfpm.yaml" <<EOF
 {yaml_content}
 EOF
 echo "[nfpm] Building RPM for {pkg} {ver}"
-if [ -z "${NFPM_ROOT:-}" ]; then
-  NFPM_ROOT=$BITS_WORK_DIR/$ARCHITECTURE/latest/nfpm
+if [ -z "${{NFPM_ROOT:-}}" ]; then
+  NFPM_ROOT="${{BITS_WORK_DIR}}/${{ARCHITECTURE}}/nfpm/latest/"
 fi
-$NFPM_ROOT/nfpm pkg --packager rpm --config "$BUILDDIR/nfpm.yaml" --target "$INSTALLROOT"
+"${{NFPM_ROOT}}/nfpm" pkg --packager rpm --config "$BUILDDIR/nfpm.yaml" --target "$INSTALLROOT"
 """

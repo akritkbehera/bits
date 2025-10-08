@@ -1,0 +1,16 @@
+# pack-refs with: peeled fully-peeled sorted 
+1ea1ac188ad4b9cb662e3f8314673c63df95a589 refs/heads/master
+33d134030248633ffa7d60c0a35a783c46da034b refs/tags/bzip2-0.1
+1eb67a9d8f7f05ae310bc9ef297d176f3a3f8a37 refs/tags/bzip2-0.1pl2
+977101ad5f833f5c0a574bfeea408e5301a6b052 refs/tags/bzip2-0.9.0c
+f93cd82a9a7094ad90fd19bbc6ccf6f4627f8060 refs/tags/bzip2-0.9.5d
+795b859eee96c700e8f3c3fe68e6a9a39d95797c refs/tags/bzip2-1.0.1
+099d844292f60f9d58914da29e5773204dc55e7a refs/tags/bzip2-1.0.2
+4d540bfc95a4b0eefc1d1f388ec33534aaeb3a2f refs/tags/bzip2-1.0.3
+f10a33538e9bab6deb61779b3d8aae168824ef48 refs/tags/bzip2-1.0.4
+a1d78c550180bde11af6c559a01721c962f9f231 refs/tags/bzip2-1.0.5
+962d60610cb31e0f294a834e55ebb355be55d05a refs/tags/bzip2-1.0.6
+ba5a26448cfd06a2d45beb03a5a3beb976e2c0b6 refs/tags/bzip2-1.0.7
+^f319b98aade2a337c74b9a3b48c6daffb7809cda
+75a94bea3918e612b879d6a11ca64b8689526147 refs/tags/bzip2-1.0.8
+^6a8690fc8d26c815e798c588f796eabe9d684cf0
