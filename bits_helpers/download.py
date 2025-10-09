@@ -171,7 +171,14 @@ def downloadGit(source, dest, work_dir):
                  "exportpath": exportpath})
     makedirs(exportpath)
     if "submodules" in args:
-        args["submodules"] = " git submodule update --recursive --init &&"
+        args["submodules"] = (
+           " git submodule update --recursive --init 2>&1 | tee /tmp/submodule_output.log; "
+           "if grep -q \\\"could not look up configuration 'remote.origin.url'\\\" /tmp/submodule_output.log; then "
+           "ORG_URL=$(echo %(gitroot)s | sed 's|git+\\(https://github.com/[^/]*\\)/.*|\\1|'); "
+           "git config remote.origin.url ${ORG_URL}/$(basename $(git rev-parse --show-toplevel)).git && "
+           "git submodule sync --recursive && "
+           "git submodule update --recursive --init; fi &&"
+        )
     else:
         args["submodules"] = ""
     command = format("cd %(exportpath)s &&"

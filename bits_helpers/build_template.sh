@@ -126,9 +126,6 @@ function Run() { # dummy function
     true
 }
 
-if [ -f "$WORK_DIR/SPECS/$ARCHITECTURE/$PKGNAME/$PKGVERSION-$PKGREVISION/$PKGNAME.rpm.sh" ]; then
-  bash -e -x "$WORK_DIR/SPECS/$ARCHITECTURE/$PKGNAME/$PKGVERSION-$PKGREVISION/$PKGNAME.rpm.sh"
-fi
 
 printenv
 
@@ -187,6 +184,10 @@ EOF
 cat > "$INSTALLROOT/.meta.json" <<\EOF
 %(provenance)s
 EOF
+
+if [ -f "$WORK_DIR/SPECS/$ARCHITECTURE/$PKGNAME/$PKGVERSION-$PKGREVISION/$PKGNAME.rpm.sh" ]; then
+  bash -e -x "$WORK_DIR/SPECS/$ARCHITECTURE/$PKGNAME/$PKGVERSION-$PKGREVISION/$PKGNAME.rpm.sh"
+fi
 
 cd "$WORK_DIR/INSTALLROOT/$PKGHASH/$PKGPATH"
 # Find which files need relocation.
@@ -298,6 +299,7 @@ elif [ -z "$CACHED_TARBALL" ]; then
      "$WORK_DIR/TARS/$ARCHITECTURE/$PKGNAME/$PACKAGE_WITH_REV"
 fi
 wait "$rsync_pid"
+
 
 # We've copied files into their final place; now relocate.
 cd "$WORK_DIR"

@@ -925,8 +925,18 @@ cat > "$BUILDDIR/nfpm.yaml" <<EOF
 {yaml_content}
 EOF
 echo "[nfpm] Building RPM for {pkg} {ver}"
-if [ -z "${{NFPM_ROOT:-}}" ]; then
-  NFPM_ROOT="${{BITS_WORK_DIR}}/${{ARCHITECTURE}}/nfpm/latest/"
+# Skip nfpm build if package name starts with 'defaults'
+echo "[nfpm] PKG_NAME=$PKG_NAME"
+echo "[nfpm] NFPM_ROOT=$NFPM_ROOT"
+
+if [[ "$PKG_NAME" == defaults* ]]; then
+  echo "[nfpm] Skipping RPM build for defaults package: $PKG_NAME"
+
+elif [[ "$PKG_NAME" == "go" ]]; then
+  NFPM_ROOT="$INSTALLROOT/nfpm"
+  echo "[nfpm] Adjusted NFPM_ROOT for Go: $NFPM_ROOT"
+  "$NFPM_ROOT" pkg --packager rpm --config "$BUILDDIR/nfpm.yaml" --target "$INSTALLROOT"
+else
+  "/home/abehera/rpm_bits/sw/slc9_x86-64/go/1.22.5-local4/nfpm" pkg --packager rpm --config "$BUILDDIR/nfpm.yaml" --target "$INSTALLROOT"
 fi
-"${{NFPM_ROOT}}/nfpm" pkg --packager rpm --config "$BUILDDIR/nfpm.yaml" --target "$INSTALLROOT"
 """
