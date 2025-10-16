@@ -18,6 +18,7 @@ from bits_helpers.scm import SCMError
 from bits_helpers.sync import remote_from_url
 from bits_helpers.workarea import logged_scm, updateReferenceRepoSpec, checkout_sources
 from bits_helpers.log import ProgressPrint, log_current_package
+from bits_helpers.addition import generate_spec
 from glob import glob
 from textwrap import dedent
 from collections import OrderedDict
@@ -1072,7 +1073,7 @@ def doBuild(args, parser):
 
     makedirs(scriptDir, exist_ok=True)
     writeAll("%s/%s.sh" % (scriptDir, spec["package"]), spec["recipe"])
-    writeAll("%s/%s.rpm.sh" % (scriptDir, spec["package"]), generate_nfpm_script(spec))
+    writeAll("%s/%s.spec" % (scriptDir, spec["package"]), generate_spec(spec))
     writeAll("%s/build.sh" % scriptDir, cmd_raw % {
       "provenance": create_provenance_info(spec["package"], specs, args),
       "initdotsh_deps": generate_initdotsh(p, specs, args.architecture, post_build=False),
@@ -1084,6 +1085,7 @@ def doBuild(args, parser):
       "requires": " ".join(spec["requires"]),
       "build_requires": " ".join(spec["build_requires"]),
       "runtime_requires": " ".join(spec["runtime_requires"]),
+      "full_requires": " ".join(spec["full_requires"]),
     })
 
     # Define the environment so that it can be passed up to the
