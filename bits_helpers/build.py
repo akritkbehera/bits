@@ -18,7 +18,7 @@ from bits_helpers.scm import SCMError
 from bits_helpers.sync import remote_from_url
 from bits_helpers.workarea import logged_scm, updateReferenceRepoSpec, checkout_sources
 from bits_helpers.log import ProgressPrint, log_current_package
-from bits_helpers.addition import generate_spec
+from bits_helpers.spec import generate_spec
 from glob import glob
 from textwrap import dedent
 from collections import OrderedDict
@@ -1073,11 +1073,11 @@ def doBuild(args, parser):
 
     makedirs(scriptDir, exist_ok=True)
     writeAll("%s/%s.sh" % (scriptDir, spec["package"]), spec["recipe"])
-    writeAll("%s/%s.spec" % (scriptDir, spec["package"]), generate_spec(spec))
     writeAll("%s/build.sh" % scriptDir, cmd_raw % {
       "provenance": create_provenance_info(spec["package"], specs, args),
       "initdotsh_deps": generate_initdotsh(p, specs, args.architecture, post_build=False),
       "initdotsh_full": generate_initdotsh(p, specs, args.architecture, post_build=True),
+      "generate_spec": generate_spec(spec),
       "develPrefix": develPrefix,
       "workDir": workDir,
       "configDir": abspath(args.configDir),

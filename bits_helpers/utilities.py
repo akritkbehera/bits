@@ -203,7 +203,7 @@ def resolve_tag(spec):
   - %(day)s
   - %(hour)s
   """
-  return spec["tag"] % nowKwds
+  return spec["tag"] % {**nowKwds, **spec}
 
 
 def normalise_multiple_options(option, sep=","):

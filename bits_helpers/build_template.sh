@@ -126,10 +126,6 @@ function Run() { # dummy function
     true
 }
 
-if [ -f "$WORK_DIR/SPECS/$ARCHITECTURE/$PKGNAME/$PKGVERSION-$PKGREVISION/$PKGNAME.spec" ]; then
-  bash -e -x "$WORK_DIR/SPECS/$ARCHITECTURE/$PKGNAME/$PKGVERSION-$PKGREVISION/$PKGNAME.spec"
-fi
-
 printenv
 
 if [[ "$CACHED_TARBALL" == "" && ! -f $BUILDROOT/log ]]; then
@@ -170,6 +166,17 @@ rm -f "$INSTALLROOT/etc/profile.d/init.sh"
 cat <<\EOF > "$INSTALLROOT/etc/profile.d/init.sh"
 %(initdotsh_full)s
 EOF
+
+cat <<EOF > "$INSTALLROOT/$PKGNAME.spec"
+%(generate_spec)s
+EOF
+mkdir -p "$BITS_WORK_DIR/rpmbuild"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+chmod -R u+w "$BITS_WORK_DIR/rpmbuild"
+cp $INSTALLROOT/$PKGNAME.spec $BITS_WORK_DIR/rpmbuild/SPECS/
+"$BITS_WORK_DIR/$ARCHITECTURE/rpm/latest/bin/rpmbuild" -bb \
+  --define "_topdir $BITS_WORK_DIR/rpmbuild" \
+  --define "buildroot $BITS_WORK_DIR/rpmbuild/BUILDROOT/$PKGNAME" \
+  "$BITS_WORK_DIR/rpmbuild/SPECS/$PKGNAME.spec"
 
 cd "$WORK_DIR/INSTALLROOT/$PKGHASH"
 # Replace the .envrc to point to the final installation directory.
