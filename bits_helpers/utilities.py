@@ -178,19 +178,8 @@ def resolve_spec_data(spec, data, defaults, branch_basename="", branch_stream=""
   while re.search("\%\([a-zA-Z][a-zA-Z0-9_]*\)s", data):
     data = data % all_vars
   if data.startswith("shell(") and data.endswith(")"):
-    cmd = data[len("shell("):-1].strip()
-    try:
-      result = subprocess.run(
-          cmd,
-          shell=True,
-          text=True,
-          capture_output=True,
-          check=True
-      )
-      data = result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-      error("Shell command failed: %s" % e.stderr.strip())
-      return f"ERROR: {e.stderr.strip()}"
+    cmd = data[6:-1].strip()
+    data = os.popen(cmd).read().strip()
   return data
 
 def resolve_version(spec, defaults, branch_basename, branch_stream):
