@@ -37,6 +37,25 @@ export PATH=$WORK_DIR/wrapper-scripts:$PATH
 # - RUNTIME_REQUIRES
 # - PKGDIR
 
+INCLUDE() {
+    local include_name="$1"
+    local target_path="$BITS_REPO_DIR/$include_name"
+
+    if [[ -d "$target_path" ]]; then
+        [[ ":$PATH:" != *":$target_path:"* ]] && export PATH="$target_path:$PATH"
+
+    elif [[ -f "$target_path" ]]; then
+        chmod +x "$target_path"
+        local dir_path
+        dir_path="$(dirname "$target_path")"
+        [[ ":$PATH:" != *":$dir_path:"* ]] && export PATH="$dir_path:$PATH"
+        "$target_path"   # <-- executes the script
+    else
+        echo "Error: '$target_path' not found under \$BITS_REPO_DIR." >&2
+        return 1
+    fi
+}
+
 export PKG_NAME="$PKGNAME"
 export PKG_VERSION="$PKGVERSION"
 export PKG_BUILDNUM="$PKGREVISION"
@@ -173,10 +192,13 @@ EOF
 mkdir -p "$BITS_WORK_DIR/rpmbuild"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 chmod -R u+w "$BITS_WORK_DIR/rpmbuild"
 cp $INSTALLROOT/$PKGNAME.spec $BITS_WORK_DIR/rpmbuild/SPECS/
-"$BITS_WORK_DIR/$ARCHITECTURE/rpm/latest/bin/rpmbuild" -bb \
-  --define "_topdir $BITS_WORK_DIR/rpmbuild" \
-  --define "buildroot $BITS_WORK_DIR/rpmbuild/BUILDROOT/$PKGNAME" \
-  "$BITS_WORK_DIR/rpmbuild/SPECS/$PKGNAME.spec"
+(
+  source "$BITS_WORK_DIR/$ARCHITECTURE/rpm/latest/etc/profile.d/init.sh"
+  rpmbuild -bb \
+    --define "_topdir $BITS_WORK_DIR/rpmbuild" \
+    --define "buildroot $BITS_WORK_DIR/rpmbuild/BUILDROOT/$PKGNAME" \
+    "$BITS_WORK_DIR/rpmbuild/SPECS/$PKGNAME.spec"
+)
 
 cd "$WORK_DIR/INSTALLROOT/$PKGHASH"
 # Replace the .envrc to point to the final installation directory.
