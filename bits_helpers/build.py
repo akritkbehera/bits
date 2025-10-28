@@ -466,7 +466,7 @@ def create_provenance_info(package, specs, args):
 
 def doBuild(args, parser):
   syncHelper = remote_from_url(args.remoteStore, args.writeStore, args.architecture,
-                               args.workDir, getattr(args, "insecure", False))
+                               args.workDir, getattr(args, "insecur   e", False))
 
   packages = args.pkgname
   specs = {}

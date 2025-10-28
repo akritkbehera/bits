@@ -657,7 +657,9 @@ class Boto3RemoteSync:
       .format(architecture=self.architecture, **spec)
     tar_path = os.path.join(resolve_store_path(self.architecture, spec["hash"]),
                             tarball)
-    link_path = os.path.join(resolve_links_path(self.architecture, spec["package"]),
+    path = os.path.join("dist", spec["package"], spec["package"] + "-" +
+                        spec["version"] + "-" + spec["revision"])
+    link_path = os.path.join(resolve_links_path(self.architecture, path),
                              tarball)
     tar_exists = self._s3_key_exists(tar_path)
     link_exists = self._s3_key_exists(link_path)
@@ -674,6 +676,7 @@ class Boto3RemoteSync:
 
     # Upload the smaller file first, so that any parallel uploads are more
     # likely to find it and fail.
+    print(f"The link_path is {link_path} while the workdir is {self.workdir}.")
     self.s3.put_object(Bucket=self.writeStore, Key=link_path,
                        Body=os.readlink(os.path.join(self.workdir, link_path))
                               .lstrip("./").encode("utf-8"))
