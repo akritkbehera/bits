@@ -176,6 +176,7 @@ def downloadGit(source, dest, work_dir):
         args["submodules"] = ""
     command = format("cd %(exportpath)s &&"
                      "git init &&"
+                     "git remote add origin %(protocol)s%(gitroot)s &&"
                      "git pull --tags %(protocol)s%(gitroot)s refs/heads/%(branch)s &&"
                      "git reset --hard %(tag)s && %(submodules)s"
                      "find . ! -path '%(filter)s' -delete &&"

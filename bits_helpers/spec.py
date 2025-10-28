@@ -20,6 +20,14 @@ def generate_spec(spec: dict):
   if spec.get("package")=="system-base-import":
     return generate_system_base_spec(spec)
   content = [
+    '%define __os_install_post %{nil}\n',
+    '%define __spec_install_post %{nil}\n',
+    # '%define __spec_install_pre %{___build_pre}\n',
+    '%define _empty_manifest_terminate_build 0\n',
+    '%define _use_internal_dependency_generator 0\n',
+    '%define _source_payload w9.gzdio\n',
+    '%define _binary_payload w9.gzdio\n',
+    '\n',
     f'Name: {rpm_name(spec)}\n',  # Pass without the initial $
     'Version: $PKG_VERSION\n',
     'Release: $PKGREVISION\n',
@@ -27,18 +35,22 @@ def generate_spec(spec: dict):
     'License: MIT\n',
     'BuildArch: $(uname -m)\n',
   ]
-  content.append('\n%description\n')
-  content.append('CMS package for $PKG_NAME\n')
-  content.append('Built on: $(hostname)\n')
-  content.append('Build date: $(date)\n')
+
   full_requires = spec.get("full_runtime_requires", set())
   if full_requires:
     for dep in sorted(full_requires):
       dep_clean = dep.lower().replace('-', '_')
       content.append(f"Requires: {rpm_name(dep_clean)}\n")
 
+  content.append('\n%description\n')
+  content.append('CMS package for $PKG_NAME\n')
+  content.append('Built on: $(hostname)\n')
+  content.append('Build date: $(date)\n')
+
   content.append('\n%install\n')
   content.append('cp -a $INSTALLROOT/* %{buildroot}/\n')
+  content.append('find %{buildroot} -type f -exec chmod u+w {} \\;\n')
+  content.append('find %{buildroot} -type d -exec chmod u+w {} \\;\n')
   content.append('\n%files\n')
   content.append('/*\n')
   return ''.join(content)

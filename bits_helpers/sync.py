@@ -341,7 +341,7 @@ class CVMFSRemoteSync:
     os.makedirs(os.path.join(self.workdir, links_path), exist_ok=True)
 
     cvmfs_architecture = re.sub(r"slc(\d+)_x86-64", r"el\1-x86_64", self.architecture)
-    err = execute("""\
+    err = execute(r"""\
     set -x
     # Exit without error in case we do not have any package published
     test -d "{remote_store}/{cvmfs_architecture}/Packages/{package}" || exit 0
@@ -371,6 +371,7 @@ class CVMFSRemoteSync:
       remote_store=self.remoteStore,
       links_path=links_path,
     ))
+    print(f"fetch_symlink: maybe something wrong? {err}")
 
   def upload_symlinks_and_tarball(self, spec) -> None:
     dieOnError(True, "CVMFS backend does not support uploading directly")
@@ -504,7 +505,7 @@ class Boto3RemoteSync:
       sys.exit(1)
 
     try:
-      self.s3 = boto3.client("s3", endpoint_url="https://s3.cern.ch",
+      self.s3 = boto3.client("s3", endpoint_url="https://s3.eu-north-1.amazonaws.com",
                              aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
                              aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"])
     except KeyError:
@@ -684,8 +685,7 @@ class Boto3RemoteSync:
         self.s3.put_object(Bucket=self.writeStore,
                            Key=link_key,
                            Body=os.fsencode(hash_path),
-                           ACL="public-read",
-                           WebsiteRedirectLocation=hash_path)
+                           WebsiteRedirectLocation="/"+hash_path)
       debug("Uploaded %d dist symlinks to S3 from %s",
             len(symlinks), link_dir)
 

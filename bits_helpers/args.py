@@ -36,7 +36,6 @@ def doParseArgs():
   For help about each option, specify --help after the option itself. For
   complete documentation please refer to https://alisw.github.io/alibuild.
   """)
-
   parser.add_argument("-d", "--debug", dest="debug", action="store_true", help="Enable debug log output")
   parser.add_argument("-n", "--dry-run", dest="dryRun", action="store_true",
                       help="Print what would happen, without actually doing it.")
@@ -67,6 +66,8 @@ def doParseArgs():
   # Options for the build command
   build_parser.add_argument("pkgname", metavar="PACKAGE", nargs="+",
                             help="One of the packages in CONFIGDIR. May be specified multiple times.")
+  build_parser.add_argument("-s", "--spec", dest="generate_spec", action="store_true",
+                            help="Generate RPM spec file and build RPM for the package.")
 
   build_parser.add_argument("--defaults", dest="defaults", default="o2", metavar="DEFAULT",
                             help="Use defaults from CONFIGDIR/defaults-%(metavar)s.sh.")
@@ -466,7 +467,7 @@ def finaliseArgs(args, parser):
     if args.architecture in S3_SUPPORTED_ARCHS and not args.preferSystem and not args.no_remote_store:
       args.noSystem = "*"
       if not args.remoteStore:
-        args.remoteStore = "https://s3.cern.ch/swift/v1/alibuild-repo"
+        args.remoteStore = "b3://bits-demo-store"
     elif args.no_remote_store:
       args.remoteStore = ""
 

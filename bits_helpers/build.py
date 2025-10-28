@@ -11,7 +11,7 @@ from bits_helpers.utilities import parseDefaults, readDefaults
 from bits_helpers.utilities import getPackageList, asList
 from bits_helpers.utilities import validateDefaults
 from bits_helpers.utilities import Hasher
-from bits_helpers.utilities import resolve_tag, resolve_version, short_commit_hash, resolve_spec_data, generate_nfpm_script
+from bits_helpers.utilities import resolve_tag, resolve_version, short_commit_hash, resolve_spec_data
 from bits_helpers.git import Git, git
 from bits_helpers.sl import Sapling
 from bits_helpers.scm import SCMError
