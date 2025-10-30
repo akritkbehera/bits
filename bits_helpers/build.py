@@ -1290,14 +1290,14 @@ def doBuild(args, parser):
     # We need to create 2 sets of links, once with the full requires,
     # once with only direct dependencies, since that's required to
     # register packages.
-    createDistLinks(spec, specs, args, syncHelper, "dist", "full_requires")
-    createDistLinks(spec, specs, args, syncHelper, "dist-direct", "requires")
-    createDistLinks(spec, specs, args, syncHelper, "dist-runtime", "full_runtime_requires")
+      createDistLinks(spec, specs, args, syncHelper, "dist", "full_requires")
+      createDistLinks(spec, specs, args, syncHelper, "dist-direct", "requires")
+      createDistLinks(spec, specs, args, syncHelper, "dist-runtime", "full_runtime_requires")
 
     # Make sure not to upload local-only packages! These might have been
     # produced in a previous run with a read-only remote store.
-    if not spec["revision"].startswith("local"):
-      syncHelper.upload_symlinks_and_tarball(spec)
+      if not spec["revision"].startswith("local"):
+        syncHelper.upload_symlinks_and_tarball(spec)
 
   if not args.onlyDeps:
       banner("Build of %s successfully completed on `%s'.\n"

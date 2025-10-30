@@ -778,8 +778,7 @@ def getPackageList(packages, specs, configDir, preferSystem, noSystem,
     spec["runtime_requires"] = spec["requires"]
     spec["requires"] = spec["runtime_requires"] + spec["build_requires"]
     # Check that version is a string
-    dieOnError(not isinstance(spec["version"], str),
-               "In recipe \"%s\": version must be a string" % p)
+    dieOnError(not isinstance(spec["version"], str), "In recipe \"%s\": version must be a string" % p)
     spec["tag"] = spec.get("tag", spec["version"])
     spec["version"] = spec["version"].replace("/", "_")
     spec["recipe"] = recipe.strip("\n")
