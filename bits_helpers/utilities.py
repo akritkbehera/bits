@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
+import os
 import yaml
+import json
+from typing import Any, IO
+
+
 from os.path import exists
 import hashlib
 from glob import glob
@@ -328,21 +333,34 @@ def disabledByArchitectureDefaults(arch, defaults, requires):
     elif not re.match(matcher, arch):
       yield require
 
-def readDefaults(configDir, defaults, error, architecture):
-  '''
-  defaultsFilename = "%s/defaults-%s.sh" % (configDir, defaults)
-  if not exists(defaultsFilename):
-    error("Default `%s' does not exists. Viable options:\n%s" %
-          (defaults or "<no defaults specified>",
-           "\n".join("- " + basename(x).replace("defaults-", "").replace(".sh", "")
-                     for x in glob(join(configDir, "defaults-*.sh")))))
-  '''
-  defaultsFilename = resolveDefaultsFilename(defaults,configDir)
+def deep_merge_dicts(dict1, dict2):
+    result = dict1.copy()
+    for key, value in dict2.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = deep_merge_dicts(result[key], value)
+        else:
+            result[key] = value
+    return result
   
+def readDefaults(configDir, defaults, error, architecture, xdefaults):
+
+  defaultsFilename = resolveDefaultsFilename(defaults,configDir)
   err, defaultsMeta, defaultsBody = parseRecipe(getRecipeReader(defaultsFilename))
   if err:
     error(err)
     sys.exit(1)
+
+  if xdefaults is not None:
+    xDefaults = resolveDefaultsFilename(xdefaults,configDir)
+    xMeta = {}
+    xBody = ""
+    if exists(xDefaults):
+      err, xMeta, xBody = parseRecipe(getRecipeReader(xDefaults))
+      if err:
+        error(err)
+        sys.exit(1)
+      defaultsMeta = deep_merge_dicts(defaultsMeta, xMeta)
+         
   archDefaults = "%s/defaults-%s.sh" % (configDir, architecture)
   archMeta = {}
   archBody = ""
@@ -354,6 +372,7 @@ def readDefaults(configDir, defaults, error, architecture):
     for x in ["env", "disable", "overrides"]:
       defaultsMeta.setdefault(x, {}).update(archMeta.get(x, {}))
     defaultsBody += "\n# Architecture defaults\n" + archBody
+
   return (defaultsMeta, defaultsBody)
 
 def getRecipeReader(url: str, dist=None, genPackages={}):
@@ -402,10 +421,33 @@ class GitReader(object):
 
 def yamlLoad(s):
   class YamlSafeOrderedLoader(yaml.SafeLoader):
-    pass
+    """YAML Loader with `!include` constructor."""
+    
+    def __init__(self, stream: IO) -> None:
+      """Initialise Loader."""
+      try:
+        self._root = os.path.split(stream.name)[0]
+      except AttributeError:
+        self._root = os.path.curdir
+      super().__init__(stream)
+
+  def construct_include(loader: YamlSafeOrderedLoader, node: yaml.Node) -> Any:
+    """Include file referenced at node."""
+    filename = os.path.abspath(os.path.join(loader._root, loader.construct_scalar(node)))
+    extension = os.path.splitext(filename)[1].lstrip('.')
+    with open(filename, 'r') as f:
+      if extension in ('yaml', 'yml'):
+        return yaml.load(f, YamlSafeOrderedLoader)
+      elif extension in ('json', ):
+        return json.load(f)
+      else:
+        return ''.join(f.readlines())
+
   def construct_mapping(loader, node):
     loader.flatten_mapping(node)
     return OrderedDict(loader.construct_pairs(node))
+
+  YamlSafeOrderedLoader.add_constructor('!include', construct_include)
   YamlSafeOrderedLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
                                         construct_mapping)
   return yaml.load(s, YamlSafeOrderedLoader)
@@ -473,6 +515,24 @@ def parseDefaults(disable, defaultsGetter, log):
   for x in defaultsDisable:
     log("Package %s has been disabled by current default.", x)
   disable.extend(defaultsDisable)
+
+  d0 = defaultsMeta.get("overrides", OrderedDict())
+
+  dlist = []
+
+  if type(d0) == list :
+    for x in d0:
+      if type(x) == list:
+        for y in x:
+          if type(y) == OrderedDict:
+            dlist.append(y)
+      elif type(x) == OrderedDict:
+        dlist.append(x)
+      d0 = dlist.pop(0)
+      for item in dlist:
+        d0 = deep_merge_dicts(d0, dlist.pop(0))
+      defaultsMeta["overrides"] = d0
+  
   if type(defaultsMeta.get("overrides", OrderedDict())) != OrderedDict:
     return ("overrides should be a dictionary", None, None)
   overrides, taps = OrderedDict(), {}
@@ -675,9 +735,11 @@ def getPackageList(packages, specs, configDir, preferSystem, noSystem,
             spec = replacement
             # Allows generalising the version based on the actual key provided
             spec["version"] = spec["version"].replace("%(key)s", key)
+            # We need the key to inject the version into the replacement recipe later.
+            spec["key"] = key 
             recipe = replacement.get("recipe", "")
             # If there's an explicitly-specified recipe, we're still building
-            # the package. If not, aliBuild will still "build" it, but it's
+            # the package. If not, Bits will still "build" it, but it's
             # basically instantaneous, so report to the user that we're taking
             # it from the system.
             if recipe:

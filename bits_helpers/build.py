@@ -22,6 +22,7 @@ from glob import glob
 from textwrap import dedent
 from collections import OrderedDict
 from shlex import quote
+import tempfile
 
 import concurrent.futures
 import importlib
@@ -489,17 +490,17 @@ def doBuild(args, parser):
   if branch_stream == branch_basename:
     branch_stream = ""
 
-  defaultsReader = lambda : readDefaults(args.configDir, args.defaults, parser.error, args.architecture)
+  defaultsReader = lambda : readDefaults(args.configDir, args.defaults, parser.error, args.architecture, args.xdefaults)
   (err, overrides, taps) = parseDefaults(args.disable,
                                         defaultsReader, debug)
   dieOnError(err, err)
 
   makedirs(join(workDir, "SPECS"), exist_ok=True)
 
-  # If the alidist workdir contains a .sl directory, we use Sapling as SCM.
+  # If the bits workdir contains a .sl directory, we use Sapling as SCM.
   # Otherwise, we default to git (without checking for the actual presence of
   # .git). We mustn't check for a .git directory, because some tests use a
-  # subdirectory of the bits source tree as the "alidist" checkout, and
+  # subdirectory of the bits source tree as the "*.bits" checkout, and
   # that won't have a .git directory.
   scm = exists("%s/.sl" % args.configDir) and Sapling() or Git()
   try:
@@ -516,6 +517,10 @@ def doBuild(args, parser):
   install_wrapper_script("git", workDir)
 
   with DockerRunner(args.dockerImage, args.docker_extra_args) as getstatusoutput_docker:
+    def performPreferCheckWithTempDir(pkg, cmd):
+      with tempfile.TemporaryDirectory(prefix=f"bits_prefer_check_{pkg['package']}_") as temp_dir:
+        return getstatusoutput_docker(cmd, cwd=temp_dir)
+
     systemPackages, ownPackages, failed, validDefaults = \
       getPackageList(packages                = packages,
                      specs                   = specs,
@@ -526,8 +531,8 @@ def doBuild(args, parser):
                      disable                 = args.disable,
                      force_rebuild           = args.force_rebuild,
                      defaults                = args.defaults,
-                     performPreferCheck      = lambda pkg, cmd: getstatusoutput_docker(cmd),
-                     performRequirementCheck = lambda pkg, cmd: getstatusoutput_docker(cmd),
+                     performPreferCheck      = performPreferCheckWithTempDir,
+                     performRequirementCheck = performPreferCheckWithTempDir,
                      performValidateDefaults = lambda spec: validateDefaults(spec, args.defaults),
                      overrides               = overrides,
                      taps                    = taps,
@@ -622,7 +627,7 @@ def doBuild(args, parser):
     spec["commit_hash"] = "0"
     develPackageBranch = ""
     # This is a development package (i.e. a local directory named like
-    # spec["package"]), but there is no "source" key in its alidist recipe,
+    # spec["package"]), but there is no "source" key in its bits recipe,
     # so there shouldn't be any code for it! Presumably, a user has
     # mistakenly named a local directory after one of our packages.
     dieOnError("source" not in spec and spec["is_devel_pkg"],
@@ -631,7 +636,7 @@ def doBuild(args, parser):
                "mistake, please rename the {package} directory or use the "
                "'--no-local {package}' option. If bits should pick up "
                "source code from this directory, add a 'source:' key to "
-               "alidist/{recipe}.sh instead."
+               "{recipe}.sh instead."
                .format(package=p, recipe=p.lower()))
 
     if "tag" not in spec:
@@ -945,8 +950,18 @@ def doBuild(args, parser):
       spec["hash"] = spec["local_revision_hash"]
     else:
       spec["hash"] = spec["remote_revision_hash"]
+
+    # We do not use the override for devel packages, because we
+    # want to avoid having to rebuild things when the /tmp gets cleaned.
+    if spec["is_devel_pkg"]:
+        buildWorkDir = args.workDir
+    else:
+        buildWorkDir = os.environ.get("BITS_BUILD_WORK_DIR", args.workDir)
+
+    buildRoot = join(buildWorkDir, "BUILD", spec["hash"])
+
     spec["old_devel_hash"] = readHashFile(join(
-      workDir, "BUILD", spec["hash"], spec["package"], ".build_succeeded"))
+      buildRoot, spec["package"], ".build_succeeded"))
 
     # Recreate symlinks to this development package builds.
     if spec["is_devel_pkg"]:
@@ -954,9 +969,9 @@ def doBuild(args, parser):
       # Ignore errors here, because the path we're linking to might not exist
       # (if this is the first run through the loop). On the second run
       # through, the path should have been created by the build process.
-      call_ignoring_oserrors(symlink, spec["hash"], join(workDir, "BUILD", spec["package"] + "-latest"))
+      call_ignoring_oserrors(symlink, spec["hash"], join(buildWorkDir, "BUILD", spec["package"] + "-latest"))
       if develPrefix:
-        call_ignoring_oserrors(symlink, spec["hash"], join(workDir, "BUILD", spec["package"] + "-latest-" + develPrefix))
+        call_ignoring_oserrors(symlink, spec["hash"], join(buildWorkDir, "BUILD", spec["package"] + "-latest-" + develPrefix))
       # Last package built gets a "latest" mark.
       call_ignoring_oserrors(symlink, "{version}-{revision}".format(**spec),
                              join(workDir, args.architecture, spec["package"], "latest"))
@@ -1008,7 +1023,7 @@ def doBuild(args, parser):
       # assuming the package is not a development one. We also can
       # delete the SOURCES in case we have aggressive-cleanup enabled.
       if not spec["is_devel_pkg"] and args.autoCleanup:
-        cleanupDirs = [join(workDir, "BUILD", spec["hash"]),
+        cleanupDirs = [buildRoot,
                        join(workDir, "INSTALLROOT", spec["hash"])]
         if args.aggressiveCleanup:
           cleanupDirs.append(join(workDir, "SOURCES", spec["package"]))
@@ -1017,13 +1032,13 @@ def doBuild(args, parser):
         for d in cleanupDirs:
           shutil.rmtree(d.encode("utf8"), True)
         try:
-          unlink(join(workDir, "BUILD", spec["package"] + "-latest"))
+          unlink(join(buildWorkDir, "BUILD", spec["package"] + "-latest"))
           if "develPrefix" in args:
-            unlink(join(workDir, "BUILD", spec["package"] + "-latest-" + args.develPrefix))
+            unlink(join(buildWorkDir, "BUILD", spec["package"] + "-latest-" + args.develPrefix))
         except:
           pass
         try:
-          rmdir(join(workDir, "BUILD"))
+          rmdir(join(buildWorkDir, "BUILD"))
           rmdir(join(workDir, "INSTALLROOT"))
         except:
           pass
@@ -1111,6 +1126,7 @@ def doBuild(args, parser):
       ("FULL_RUNTIME_REQUIRES", " ".join(spec["full_runtime_requires"])),
       ("FULL_BUILD_REQUIRES", " ".join(spec["full_build_requires"])),
       ("FULL_REQUIRES", " ".join(spec["full_requires"])),
+      ("BITS_PREFER_SYSTEM_KEY", spec.get("key", "")),
     ]
     if "sources" in spec:
       for idx, src in enumerate(spec["sources"]):
@@ -1235,28 +1251,28 @@ def doBuild(args, parser):
       if spec["is_devel_pkg"]:
         updatablePkgs.append(spec["package"])
 
-      buildErrMsg = dedent("""\
-      Error while executing {sd}/build.sh on `{h}'.
-      Log can be found in {w}/BUILD/{p}-latest{devSuffix}/log
-      Please upload it to CERNBox/Dropbox if you intend to request support.
-      Build directory is {w}/BUILD/{p}-latest{devSuffix}/{p}.
-      """).format(
-        h=socket.gethostname(),
-        sd=scriptDir,
-        w=abspath(args.workDir),
-        p=spec["package"],
-        devSuffix="-" + args.develPrefix
-        if "develPrefix" in args and spec["is_devel_pkg"]
-        else "",
-      )
-      if updatablePkgs:
-        buildErrMsg += dedent("""
-        Note that you have packages in development mode.
-        Devel sources are not updated automatically, you must do it by hand.\n
-        This problem might be due to one or more outdated devel sources.
-        To update all development packages required for this build it is usually sufficient to do:
-        """)
-        buildErrMsg += "".join("\n  ( cd %s && git pull --rebase )" % dp for dp in updatablePkgs)
+    buildErrMsg = dedent("""\
+    Error while executing {sd}/build.sh on `{h}'.
+    Log can be found in {w}/BUILD/{p}-latest{devSuffix}/log
+    Please upload it to CERNBox/Dropbox if you intend to request support.
+    Build directory is {w}/BUILD/{p}-latest{devSuffix}/{p}.
+    """).format(
+      h=socket.gethostname(),
+      sd=scriptDir,
+      w=buildWorkDir,
+      p=spec["package"],
+      devSuffix="-" + args.develPrefix
+      if "develPrefix" in args and spec["is_devel_pkg"]
+      else "",
+    )
+    if updatablePkgs:
+      buildErrMsg += dedent("""
+      Note that you have packages in development mode.
+      Devel sources are not updated automatically, you must do it by hand.\n
+      This problem might be due to one or more outdated devel sources.
+      To update all development packages required for this build it is usually sufficient to do:
+      """)
+      buildErrMsg += "".join("\n  ( cd %s && git pull --rebase )" % dp for dp in updatablePkgs)
 
       # Gather build info for the error message
       try:
@@ -1270,7 +1286,7 @@ def doBuild(args, parser):
         buildErrMsg += dedent(f"""
         Build info:
         OS: {detected_arch}
-        Using aliBuild from alibuild@{__version__ or "unknown"} recipes in alidist@{os.environ["ALIBUILD_ALIDIST_HASH"][:10]}
+        Using BITS from bits@{__version__ or "unknown"} recipes in bits@{os.environ["BITS_DIST_HASH"][:10]}
         Build arguments: {args_str}
         """)
 
@@ -1278,7 +1294,7 @@ def doBuild(args, parser):
           buildErrMsg += f'XCode version: {getstatusoutput("xcodebuild -version")[1]}'
 
       except Exception as exc:
-        warning("Failed to gather build info", exc_info=exc)
+        warning("Failed to gather build info: %s", exc)
 
 
       dieOnError(err, buildErrMsg.strip())
@@ -1311,7 +1327,7 @@ def doBuild(args, parser):
   for spec in specs.values():
     if spec["is_devel_pkg"]:
       banner("Build directory for devel package %s:\n%s/BUILD/%s-latest%s/%s",
-             spec["package"], abspath(args.workDir), spec["package"],
+             spec["package"], abspath(buildWorkDir), spec["package"],
              ("-" + args.develPrefix) if "develPrefix" in args else "",
              spec["package"])
   if untrackedFilesDirectories:
