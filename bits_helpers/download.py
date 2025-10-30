@@ -14,7 +14,6 @@ from time import time
 from types import SimpleNamespace
 from bits_helpers.log import error, warning, debug
 import json
-import json
 
 urlRe = re.compile(r".*:.*/.*")
 urlAuthRe = re.compile(r'^(http(s|)://)([^:]+:[^@]+)@(.+)$')
@@ -215,7 +214,13 @@ def parseGitUrl(url):
     return protocol, gitroot, args
 
 
-
+downloadHandlers = {
+                    'http': downloadUrllib2,
+                    'https': downloadUrllib2,
+                    'ftp': downloadUrllib2,
+                    'ftps': downloadUrllib2,
+                    'git': downloadGit,
+                    'pip3': downloadPip3}
 
 
 def createTempDir(workDir, subDir):
@@ -393,3 +398,4 @@ def download(source, dest, work_dir):
     else:
         raise downloadDir
     return
+
