@@ -55,7 +55,9 @@ def makedirs(path):
         raise OSError("makedirs() failed (return: %s):\n%s" % (returncode, out))
 
 def downloadUrllib2(source, destDir, work_dir, dest_filename=None):
+def downloadUrllib2(source, destDir, work_dir, dest_filename=None):
     try:
+        dest = "/".join([destDir.rstrip("/"), dest_filename if dest_filename else basename(source)])
         dest = "/".join([destDir.rstrip("/"), dest_filename if dest_filename else basename(source)])
         headers={"Cache-Control": "no-cache"}
         m = urlAuthRe.match(source)
@@ -163,10 +165,6 @@ def parseGitUrl(url):
         args["filter"] = "*"
     args["filter"] = sanitize(args["filter"])
     return protocol, gitroot, args
-
-
-
-
 
 def createTempDir(workDir, subDir):
     tempdir = join(workDir, subDir)
