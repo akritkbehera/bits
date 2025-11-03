@@ -2,6 +2,7 @@
 import os
 import yaml
 import json
+import distro
 from typing import Any, IO
 
 
@@ -167,6 +168,8 @@ def resolve_spec_data(spec, data, defaults, branch_basename="", branch_stream=""
     "platform_machine": platform.machine(),
     "sys_platform": sys.platform,
     "os_name": os.name,
+    "distro_major_version": distro.major_version(),
+    "distro_version": distro.version(),
     **nowKwds,
   }
   for k, v in spec.get("variables",{}).items():
@@ -193,7 +196,7 @@ def resolve_tag(spec):
   - %(day)s
   - %(hour)s
   """
-  return spec["tag"] % nowKwds
+  return spec["tag"] % {**nowKwds, **spec}
 
 
 def normalise_multiple_options(option, sep=","):
