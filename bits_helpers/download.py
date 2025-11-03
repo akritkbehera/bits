@@ -213,16 +213,6 @@ def parseGitUrl(url):
     args["filter"] = sanitize(args["filter"])
     return protocol, gitroot, args
 
-
-downloadHandlers = {
-                    'http': downloadUrllib2,
-                    'https': downloadUrllib2,
-                    'ftp': downloadUrllib2,
-                    'ftps': downloadUrllib2,
-                    'git': downloadGit,
-                    'pip3': downloadPip3}
-
-
 def createTempDir(workDir, subDir):
     tempdir = join(workDir, subDir)
     if not exists(tempdir):
@@ -340,7 +330,9 @@ downloadHandlers = {
                     'ftp': downloadUrllib2,
                     'ftps': downloadUrllib2,
                     'git': downloadGit,
-                    'pip': downloadPip} 
+                    'pip3': downloadPip3,
+                    'pip': downloadPip
+                }
 
 def download(source, dest, work_dir):
     noCmssdtCache = True if 'no-cmssdt-cache=1' in source else False
