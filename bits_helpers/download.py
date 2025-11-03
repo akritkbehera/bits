@@ -86,55 +86,6 @@ def downloadUrllib2(source, destDir, work_dir, dest_filename=None):
         return False
     return True
 
-def downloadPip3(source, destdir, work_dir):
-    import os
-
-    if not source.startswith("pip3://"):
-        warning(f"Invalid source for pip3: {source}")
-        return False
-    raw = source[len("pip3://"):]
-
-    if "?version=" in raw:
-        pkg_name, version = raw.split("?version=", 1)
-    else:
-        pkg_name = raw
-        version = "latest"
-
-    pip_arg = f"{pkg_name}=={version}" if version != "latest" else pkg_name
-
-    tempdir = createTempDir(work_dir, "tmp")
-
-    cmd = [
-        "pip3", "download",
-        "--no-deps",
-        "--disable-pip-version-check",
-        "-d", tempdir,
-        pip_arg
-    ]
-    debug("Running pip3 download: " + " ".join(cmd))
-    errorcode, output = getstatusoutput(" ".join(cmd))
-    if errorcode != 0:
-        warning(f"pip3 download failed for {pip_arg}")
-        warning(output)
-        return False
-    debug(output)
-
-    downloaded_files = os.listdir(tempdir)
-    if not downloaded_files:
-        warning(f"No files downloaded for {pip_arg}")
-        return False
-
-    final_dest = join(work_dir, "SOURCES", pkg_name, version)
-    makedirs(final_dest)
-
-    for fname in downloaded_files:
-        src = join(tempdir, fname)
-        dst = join(final_dest, fname)
-        if not executeWithErrorCheck(f"cp {src} {dst}", f"Failed to copy {fname}"):
-            return False
-
-    return True
-
 # Download a files from a git url.  We do not clone the remote reposiotory, but
 # we simply pull the branch we are interested in and then we drop all the git
 # information while creating a tarball.  The syntax to define a repository is
@@ -212,16 +163,6 @@ def parseGitUrl(url):
         args["filter"] = "*"
     args["filter"] = sanitize(args["filter"])
     return protocol, gitroot, args
-
-
-downloadHandlers = {
-                    'http': downloadUrllib2,
-                    'https': downloadUrllib2,
-                    'ftp': downloadUrllib2,
-                    'ftps': downloadUrllib2,
-                    'git': downloadGit,
-                    'pip3': downloadPip3}
-
 
 def createTempDir(workDir, subDir):
     tempdir = join(workDir, subDir)
