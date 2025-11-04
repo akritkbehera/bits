@@ -1214,8 +1214,6 @@ def doBuild(args, parser):
     print(err,child.stdout)
     if(err):
       print(child.stdout)
-    #err = execute(mfCmd, printer=progress)
-    print("failed" if err else "done", err)
     buildErrMsg = dedent("""\
       Error while executing {cmd} on `{h}'.
       Log can be found in {w}/log
