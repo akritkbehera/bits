@@ -1245,13 +1245,13 @@ def doBuild(args, parser):
        )))
       buildErrMsg = dedent("""\
         Error while executing {sd}/build.sh on `{h}'.
-        Log can be found in {w}/log
+        Log can be found in {w}/BUILD/{p}-latest{devSuffix}/log
         Please upload it to CERNBox/Dropbox if you intend to request support.
-        Build directory is {w}/{p}.
+        Build directory is {w}/BUILD/{p}-latest{devSuffix}/{p}.
         """).format(
           h=socket.gethostname(),
           sd=scriptDir,
-          w=join(workDir, "BUILD", spec["hash"]),
+          w=buildWorkDir,
           p=spec["package"],
           devSuffix="-" + args.develPrefix
           if "develPrefix" in args and spec["is_devel_pkg"]

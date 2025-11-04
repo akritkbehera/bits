@@ -164,10 +164,6 @@ def parseGitUrl(url):
     args["filter"] = sanitize(args["filter"])
     return protocol, gitroot, args
 
-
-
-
-
 def createTempDir(workDir, subDir):
     tempdir = join(workDir, subDir)
     if not exists(tempdir):
@@ -341,3 +337,4 @@ def download(source, dest, work_dir):
     else:
         raise downloadDir
     return
+
