@@ -209,6 +209,31 @@ PP=\${PKGPATH:-${PKGPATH}}
 PH=${PKGHASH}
 EoF
 
+# Cms Common script from cms-common.spec
+cat > "$INSTALLROOT/cms-common.sh" <<EoF
+#!/bin/bash -e
+mkdir -p $BITS_WORK_DIR/etc/$PKGNAME
+mkdir -p $BITS_WORK_DIR/$ARCHITECTURE/etc/profile.d
+if [ -f $BITS_WORK_DIR/cmsset_default.csh ] && [ -f $BITS_WORK_DIR/etc/$PKGNAME/revision ] ; then
+  oldrev=`cat $BITS_WORK_DIR/etc/$PKGNAME/revision`
+  if [ $oldrev -ge $PKGVERSION ] ; then
+    exit 0
+  fi
+fi
+mkdir -p $BITS_WORK_DIR/{share, etc/scramrc}
+[ -d ./etc/scramrc/SCRAM ] && rsync -a --delete ./etc/scramrc/SCRAM/ $BITS_WORK_DIR/etc/scramrc/SCRAM/
+[ -d ./share ] && rsync -a ./share/ $BITS_WORK_DIR/share/
+for file in $(find . -name '*' | grep -v '^./etc/scramrc/SCRAM' ); do
+  if [ -d $file ] ; then
+    mkdir -p $BITS_WORK_DIR/$file
+  else
+    rm -f $BITS_WORK_DIR/$file
+    cp -P $file $BITS_WORK_DIR/$file
+  fi
+done
+echo $PKGVERSION > $BITS_WORK_DIR/etc/$PKGNAME/revision
+EoF
+
 while read -r unrelocated; do
   echo "sed -e \"s|/[^ ;:]*INSTALLROOT/\$PH/\$OP|\$WORK_DIR/\$PP|g; s|[@][@]PKGREVISION[@]\$PH[@][@]|$PKGREVISION|g\"" \
        "\$PP/$unrelocated.unrelocated > \$PP/$unrelocated"
