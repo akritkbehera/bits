@@ -13,6 +13,7 @@ import sys
 import os
 import re
 import platform
+import subprocess
 
 from datetime import datetime
 from collections import OrderedDict
@@ -169,6 +170,28 @@ def resolve_spec_data(spec, data, defaults, branch_basename="", branch_stream=""
     "os_name": os.name,
     **nowKwds,
   }
+  external_vars_paths = [
+      os.path.join(os.getcwd(), 'bits_variables.json'),
+      os.path.join(os.path.expanduser('~'), 'bits_variables.json')
+  ]
+  for path in external_vars_paths:
+      if os.path.exists(path):
+          with open(path, 'r') as f:
+              try:
+                  external_vars = json.load(f)
+                  if isinstance(external_vars, dict):
+                      for key, value in external_vars.items():
+                          if isinstance(value, str):
+                              try:
+                                  output = subprocess.check_output(value, shell=True, text=True).strip()
+                                  all_vars[key] = output
+                              except subprocess.CalledProcessError:
+                                  all_vars[key] = value
+                          else:
+                              all_vars[key] = value
+              except json.JSONDecodeError:
+                  pass
+          break
   for k, v in spec.get("variables",{}).items():
     all_vars[k] = v
 

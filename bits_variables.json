@@ -1,0 +1,4 @@
+{
+  "external_var_1": "value1",
+  "external_var_2": "echo 'hello from shell'"
+}
