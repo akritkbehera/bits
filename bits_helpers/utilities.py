@@ -630,8 +630,7 @@ def getConfigPaths(configDir):
   return pkgDirs
 
 def resolveFilename(taps, pkg, configDir, generatedPackages):
-  search_dirs = getConfigPaths(configDir)
-  for d in search_dirs:
+  for d in getConfigPaths(configDir):
     if d in generatedPackages and pkg in generatedPackages[d]:
       meta = generatedPackages[d][pkg]
       return ("generate:%s@%s" % (pkg, meta["version"]), meta["pkgdir"])

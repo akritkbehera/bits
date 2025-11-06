@@ -501,6 +501,9 @@ def finaliseArgs(args, parser):
       args.develPrefix = "%s-%s" % (args.develPrefix, args.architecture) if "develPrefix" in args else args.architecture
 
   args.configDir=os.path.abspath(args.configDir)
+  if os.path.isfile(args.configDir):
+    args.configDir = dirname(args.configDir)
+
   if args.action == "init":
     args.configDir = args.configDir % {"prefix": args.develPrefix + "/"}
   elif args.action == "build":
