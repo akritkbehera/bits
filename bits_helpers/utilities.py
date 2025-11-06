@@ -193,7 +193,7 @@ def resolve_tag(spec):
   - %(day)s
   - %(hour)s
   """
-  return spec["tag"] % nowKwds
+  return spec["tag"] % {**nowKwds, **spec}
 
 
 def normalise_multiple_options(option, sep=","):
@@ -630,10 +630,7 @@ def getConfigPaths(configDir):
   return pkgDirs
 
 def resolveFilename(taps, pkg, configDir, generatedPackages):
-  search_dirs = []
-  for d in getConfigPaths(configDir):
-    if d not in search_dirs:
-      search_dirs.append(d)
+  search_dirs = getConfigPaths(configDir)
   for d in search_dirs:
     if d in generatedPackages and pkg in generatedPackages[d]:
       meta = generatedPackages[d][pkg]
